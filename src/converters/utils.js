@@ -135,13 +135,13 @@ export const OLLAMA_SHOW_QUANTIZATION_LEVEL = 'Q4_K_M';
 // =============================================================================
 
 /**
- * 判断值是否为 undefined 或 0，并返回默认值
+ * 判断值是否为空（undefined/null），并返回默认值
  * @param {*} value - 要检查的值
  * @param {*} defaultValue - 默认值
  * @returns {*} 处理后的值
  */
 export function checkAndAssignOrDefault(value, defaultValue) {
-    if (value !== undefined && value !== 0) {
+    if (value !== undefined && value !== null) {
         return value;
     }
     return defaultValue;
@@ -210,7 +210,7 @@ export function extractAndProcessSystemMessages(messages) {
     const nonSystemMessages = [];
 
     for (const message of messages) {
-        if (message.role === 'system') {
+        if (message.role === 'system' || message.role === 'developer') {
             systemContents.push(extractTextFromMessageContent(message.content));
         } else {
             nonSystemMessages.push(message);

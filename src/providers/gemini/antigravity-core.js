@@ -11,7 +11,7 @@ import * as readline from 'readline';
 import { v4 as uuidv4 } from 'uuid';
 import open from 'open';
 import { formatExpiryTime, isRetryableNetworkError, formatExpiryLog } from '../../utils/common.js';
-import { getProviderModels } from '../provider-models.js';
+import { getProviderModels, normalizeProviderModel, isProviderModelSupported } from '../provider-models.js';
 import { handleGeminiAntigravityOAuth } from '../../auth/oauth-handlers.js';
 import { getProxyConfigForProvider, getGoogleAuthProxyConfig } from '../../utils/proxy-utils.js';
 import { cleanJsonSchemaProperties } from '../../converters/utils.js';
@@ -92,6 +92,56 @@ const MODEL_NAME_MAP = {
  */
 function alias2ModelName(modelName) {
     return MODEL_ALIAS_MAP[modelName];
+}
+
+function createUnsupportedModelError(requestedModel, normalizedModel = requestedModel, supportedModels = ANTIGRAVITY_MODELS) {
+    const requested = typeof requestedModel === 'string' && requestedModel.trim()
+        ? requestedModel
+        : '<empty>';
+    const normalized = typeof normalizedModel === 'string' && normalizedModel.trim()
+        ? normalizedModel
+        : requested;
+    const normalizationHint = normalized !== requested ? ` Resolved as '${normalized}'.` : '';
+    const supported = Array.isArray(supportedModels) && supportedModels.length > 0
+        ? supportedModels.join(', ')
+        : ANTIGRAVITY_MODELS.join(', ');
+
+    const error = new Error(`[Antigravity] Unsupported model '${requested}'.${normalizationHint} Supported models: ${supported}`);
+    error.statusCode = 400;
+    error.code = 400;
+    return error;
+}
+
+function resolveAntigravityModel(modelName, availableModels = null) {
+    if (typeof modelName !== 'string' || !modelName.trim()) {
+        throw createUnsupportedModelError(modelName);
+    }
+
+    const normalizedAlias = normalizeProviderModel(MODEL_PROVIDER.ANTIGRAVITY, modelName);
+    const supportedModelList = Array.isArray(availableModels) && availableModels.length > 0
+        ? availableModels
+        : ANTIGRAVITY_MODELS;
+
+    if (!isProviderModelSupported(MODEL_PROVIDER.ANTIGRAVITY, normalizedAlias)) {
+        throw createUnsupportedModelError(modelName, normalizedAlias, supportedModelList);
+    }
+
+    if (supportedModelList.length > 0 && !supportedModelList.includes(normalizedAlias)) {
+        throw createUnsupportedModelError(modelName, normalizedAlias, supportedModelList);
+    }
+
+    const actualModelName = alias2ModelName(normalizedAlias);
+    if (!actualModelName) {
+        const error = new Error(`[Antigravity] Missing upstream model mapping for alias '${normalizedAlias}'.`);
+        error.statusCode = 500;
+        error.code = 500;
+        throw error;
+    }
+
+    return {
+        selectedModel: normalizedAlias,
+        actualModelName
+    };
 }
 
 /**
@@ -1326,13 +1376,10 @@ export class AntigravityApiService {
             }
         }
 
-        let selectedModel = model;
-        if (!this.availableModels.includes(model)) {
-            logger.warn(`[Antigravity] Model '${model}' not found. Using default model: '${this.availableModels[0]}'`);
-            selectedModel = this.availableModels[0];
+        const { selectedModel, actualModelName } = resolveAntigravityModel(model, this.availableModels);
+        if (selectedModel !== model) {
+            logger.info(`[Antigravity] Model normalized: '${model}' -> '${selectedModel}'`);
         }
-
-        const actualModelName = alias2ModelName(selectedModel);
         // 深拷贝请求体
         const processedRequestBody = ensureRolesInContents(JSON.parse(JSON.stringify(requestBody)), actualModelName);
         const isClaudeModel = isClaude(actualModelName);
@@ -1399,13 +1446,10 @@ export class AntigravityApiService {
             }
         }
 
-        let selectedModel = model;
-        if (!this.availableModels.includes(model)) {
-            logger.warn(`[Antigravity] Model '${model}' not found. Using default model: '${this.availableModels[0]}'`);
-            selectedModel = this.availableModels[0];
+        const { selectedModel, actualModelName } = resolveAntigravityModel(model, this.availableModels);
+        if (selectedModel !== model) {
+            logger.info(`[Antigravity] Model normalized: '${model}' -> '${selectedModel}'`);
         }
-
-        const actualModelName = alias2ModelName(selectedModel);
         // 深拷贝请求体
         const processedRequestBody = ensureRolesInContents(JSON.parse(JSON.stringify(requestBody)), actualModelName);
 

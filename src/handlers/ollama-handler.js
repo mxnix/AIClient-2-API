@@ -7,7 +7,7 @@ import { getRequestBody, handleError, MODEL_PROTOCOL_PREFIX, MODEL_PROVIDER, get
 import logger from '../utils/logger.js';
 import { convertData } from '../convert/convert.js';
 import { ConverterFactory } from '../converters/ConverterFactory.js';
-import { getProviderModels } from '../providers/provider-models.js';
+import { getProviderModels, isProviderModelSupported } from '../providers/provider-models.js';
 // Ollama版本号
 /**
  * Model name prefix mapping for different providers
@@ -254,8 +254,7 @@ function findProviderByModelName(modelName) {
     
     // Check each provider's model list
     for (const providerType of providerTypes) {
-        const models = getProviderModels(providerType);
-        if (models.includes(modelName)) {
+        if (isProviderModelSupported(providerType, modelName)) {
             return providerType;
         }
     }

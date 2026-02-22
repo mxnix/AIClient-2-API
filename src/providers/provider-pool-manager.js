@@ -3,7 +3,7 @@ import * as crypto from 'crypto';
 import { getServiceAdapter } from './adapter.js';
 import logger from '../utils/logger.js';
 import { MODEL_PROVIDER, getProtocolPrefix } from '../utils/common.js';
-import { getProviderModels } from './provider-models.js';
+import { normalizeProviderModel, isProviderModelSupported } from './provider-models.js';
 import { broadcastEvent } from '../ui-modules/event-broadcast.js';
 import axios from 'axios';
 
@@ -662,22 +662,31 @@ export class ProviderPoolManager {
 
         // 如果指定了模型，则排除不支持该模型的提供商
         if (requestedModel) {
+            const normalizedRequestedModel = normalizeProviderModel(providerType, requestedModel);
+
+            if (!isProviderModelSupported(providerType, normalizedRequestedModel)) {
+                this._log('warn', `Model '${requestedModel}' (normalized: '${normalizedRequestedModel}') is not supported by provider type: ${providerType}`);
+                return null;
+            }
+
             const modelFilteredProviders = availableAndHealthyProviders.filter(p => {
                 // 如果提供商没有配置 notSupportedModels，则认为它支持所有模型
-                if (!p.config.notSupportedModels || !Array.isArray(p.config.notSupportedModels)) {
+                if (!p.config.notSupportedModels || !Array.isArray(p.config.notSupportedModels) || p.config.notSupportedModels.length === 0) {
                     return true;
                 }
-                // 检查 notSupportedModels 数组中是否包含请求的模型，如果包含则排除
-                return !p.config.notSupportedModels.includes(requestedModel);
+
+                // 检查 notSupportedModels（含别名归一化）是否包含请求模型
+                const normalizedNotSupportedModels = p.config.notSupportedModels.map(model => normalizeProviderModel(providerType, model));
+                return !normalizedNotSupportedModels.includes(normalizedRequestedModel);
             });
 
             if (modelFilteredProviders.length === 0) {
-                this._log('warn', `No available providers for type: ${providerType} that support model: ${requestedModel}`);
+                this._log('warn', `No available providers for type: ${providerType} that support model: ${requestedModel} (normalized: ${normalizedRequestedModel})`);
                 return null;
             }
 
             availableAndHealthyProviders = modelFilteredProviders;
-            this._log('debug', `Filtered ${modelFilteredProviders.length} providers supporting model: ${requestedModel}`);
+            this._log('debug', `Filtered ${modelFilteredProviders.length} providers supporting model: ${requestedModel} (normalized: ${normalizedRequestedModel})`);
         }
 
         if (availableAndHealthyProviders.length === 0) {
@@ -782,10 +791,9 @@ export class ProviderPoolManager {
                     continue;
                 }
 
-                // 检查 fallback 类型是否支持请求的模型
-                const supportedModels = getProviderModels(currentType);
-                if (supportedModels.length > 0 && !supportedModels.includes(requestedModel)) {
-                    this._log('debug', `Skipping fallback type ${currentType}: model ${requestedModel} not supported`);
+                const normalizedFallbackModel = normalizeProviderModel(currentType, requestedModel);
+                if (!isProviderModelSupported(currentType, normalizedFallbackModel)) {
+                    this._log('debug', `Skipping fallback type ${currentType}: model ${requestedModel} (normalized: ${normalizedFallbackModel}) not supported`);
                     continue;
                 }
             }
@@ -813,6 +821,7 @@ export class ProviderPoolManager {
             const mapping = this.modelFallbackMapping[requestedModel];
             const targetProviderType = mapping.targetProviderType;
             const targetModel = mapping.targetModel;
+            const normalizedTargetModel = normalizeProviderModel(targetProviderType, targetModel);
 
             if (targetProviderType && targetModel) {
                 this._log('info', `Trying Model Fallback Mapping for ${requestedModel}: -> ${targetProviderType} (${targetModel})`);
@@ -823,16 +832,21 @@ export class ProviderPoolManager {
                 
                 // 检查目标类型是否有配置的池
                 if (this.providerStatus[targetProviderType] && this.providerStatus[targetProviderType].length > 0) {
+                    if (!isProviderModelSupported(targetProviderType, normalizedTargetModel)) {
+                        this._log('warn', `Model fallback target not supported: ${targetProviderType} (${targetModel} -> ${normalizedTargetModel})`);
+                        return null;
+                    }
+
                     // 尝试从目标类型选择提供商（使用转换后的模型名，现在是异步的）
-                    const selectedConfig = await this.selectProvider(targetProviderType, targetModel, options);
+                    const selectedConfig = await this.selectProvider(targetProviderType, normalizedTargetModel, options);
                     
                     if (selectedConfig) {
-                        this._log('info', `Fallback activated (Model Mapping): ${providerType} (${requestedModel}) -> ${targetProviderType} (${targetModel}) (uuid: ${selectedConfig.uuid})`);
+                        this._log('info', `Fallback activated (Model Mapping): ${providerType} (${requestedModel}) -> ${targetProviderType} (${normalizedTargetModel}) (uuid: ${selectedConfig.uuid})`);
                         return {
                             config: selectedConfig,
                             actualProviderType: targetProviderType,
                             isFallback: true,
-                            actualModel: targetModel // 返回实际使用的模型名，供上层进行请求转换
+                            actualModel: normalizedTargetModel // 返回实际使用的模型名，供上层进行请求转换
                         };
                     } else {
                         // 如果目标类型的主池也不可用，尝试目标类型的 fallback chain
@@ -848,18 +862,17 @@ export class ProviderPoolManager {
                              
                              if (targetProtocol !== fallbackProtocol) continue;
                              
-                             // 检查模型支持
-                             const supportedModels = getProviderModels(fallbackType);
-                             if (supportedModels.length > 0 && !supportedModels.includes(targetModel)) continue;
+                             const normalizedFallbackTargetModel = normalizeProviderModel(fallbackType, normalizedTargetModel);
+                             if (!isProviderModelSupported(fallbackType, normalizedFallbackTargetModel)) continue;
                              
-                             const fallbackSelectedConfig = await this.selectProvider(fallbackType, targetModel, options);
+                             const fallbackSelectedConfig = await this.selectProvider(fallbackType, normalizedFallbackTargetModel, options);
                              if (fallbackSelectedConfig) {
-                                 this._log('info', `Fallback activated (Model Mapping -> Chain): ${providerType} (${requestedModel}) -> ${targetProviderType} -> ${fallbackType} (${targetModel}) (uuid: ${fallbackSelectedConfig.uuid})`);
+                                 this._log('info', `Fallback activated (Model Mapping -> Chain): ${providerType} (${requestedModel}) -> ${targetProviderType} -> ${fallbackType} (${normalizedFallbackTargetModel}) (uuid: ${fallbackSelectedConfig.uuid})`);
                                  return {
                                      config: fallbackSelectedConfig,
                                      actualProviderType: fallbackType,
                                      isFallback: true,
-                                     actualModel: targetModel
+                                     actualModel: normalizedFallbackTargetModel
                                  };
                              }
                         }

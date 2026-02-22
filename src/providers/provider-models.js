@@ -91,6 +91,95 @@ export const PROVIDER_MODELS = {
 };
 
 /**
+ * 提供商模型别名映射（alias -> canonical）
+ * 用于兼容客户端传入的简写/历史模型名。
+ */
+export const PROVIDER_MODEL_ALIASES = {
+    'gemini-cli-oauth': {
+        'gemini-3.1-pro': 'gemini-3.1-pro-preview',
+        'gemini-3-pro': 'gemini-3-pro-preview',
+        'gemini-3-flash': 'gemini-3-flash-preview',
+        'gemini-2.5-pro-preview': 'gemini-2.5-pro-preview-06-05',
+        'gemini-2.5-flash-preview': 'gemini-2.5-flash-preview-09-2025'
+    },
+    'gemini-antigravity': {
+        'gemini-3.1-pro': 'gemini-3.1-pro-preview',
+        'gemini-3-pro': 'gemini-3-pro-preview',
+        'gemini-3-flash': 'gemini-3-flash-preview',
+        'gemini-3-pro-image': 'gemini-3-pro-image-preview',
+        'gemini-2.5-flash': 'gemini-2.5-flash-preview'
+    }
+};
+
+/**
+ * 规范化提供商模型名（含别名解析）
+ * @param {string} providerType - 提供商类型
+ * @param {string} model - 原始模型名
+ * @returns {string} 规范化后的模型名
+ */
+export function normalizeProviderModel(providerType, model) {
+    if (typeof model !== 'string') {
+        return model;
+    }
+
+    const trimmedModel = model.trim();
+    if (!trimmedModel) {
+        return trimmedModel;
+    }
+
+    const cleanModel = trimmedModel.startsWith('models/')
+        ? trimmedModel.substring('models/'.length)
+        : trimmedModel;
+
+    const isAntiModel = cleanModel.startsWith('anti-');
+    const baseModel = isAntiModel ? cleanModel.substring('anti-'.length) : cleanModel;
+
+    const aliasMap = PROVIDER_MODEL_ALIASES[providerType] || {};
+    const normalizedBaseModel = aliasMap[baseModel] || baseModel;
+
+    return isAntiModel ? `anti-${normalizedBaseModel}` : normalizedBaseModel;
+}
+
+/**
+ * 检查提供商是否支持指定模型（含别名解析）
+ * @param {string} providerType - 提供商类型
+ * @param {string} model - 原始模型名
+ * @returns {boolean} 是否支持
+ */
+export function isProviderModelSupported(providerType, model) {
+    if (typeof model !== 'string' || !model.trim()) {
+        return false;
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(PROVIDER_MODELS, providerType)) {
+        return false;
+    }
+
+    const providerModels = getProviderModels(providerType);
+    const normalizedModel = normalizeProviderModel(providerType, model);
+
+    // 空模型列表表示不限制模型（如 custom provider）
+    if (providerModels.length === 0) {
+        return true;
+    }
+
+    if (providerModels.includes(normalizedModel)) {
+        return true;
+    }
+
+    // anti-* 仅对 gemini-cli-oauth 生效
+    if (normalizedModel.startsWith('anti-')) {
+        if (providerType !== 'gemini-cli-oauth') {
+            return false;
+        }
+        const baseModel = normalizedModel.substring('anti-'.length);
+        return providerModels.includes(baseModel);
+    }
+
+    return false;
+}
+
+/**
  * 获取指定提供商类型支持的模型列表
  * @param {string} providerType - 提供商类型
  * @returns {Array<string>} 模型列表

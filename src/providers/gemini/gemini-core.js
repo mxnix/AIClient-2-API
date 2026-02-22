@@ -8,7 +8,7 @@ import * as os from 'os';
 import * as readline from 'readline';
 import open from 'open';
 import { API_ACTIONS, formatExpiryTime, isRetryableNetworkError, formatExpiryLog } from '../../utils/common.js';
-import { getProviderModels } from '../provider-models.js';
+import { getProviderModels, normalizeProviderModel, isProviderModelSupported } from '../provider-models.js';
 import { handleGeminiCliOAuth } from '../../auth/oauth-handlers.js';
 import { getProxyConfigForProvider, getGoogleAuthProxyConfig } from '../../utils/proxy-utils.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
@@ -37,21 +37,47 @@ const DEFAULT_CODE_ASSIST_API_VERSION = 'v1internal';
 const OAUTH_CLIENT_ID = '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com';
 const OAUTH_CLIENT_SECRET = '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';
 const GEMINI_MODELS = getProviderModels(MODEL_PROVIDER.GEMINI_CLI);
-const ANTI_TRUNCATION_MODELS = GEMINI_MODELS.map(model => `anti-${model}`);
+
+function createUnsupportedModelError(requestedModel, normalizedModel = requestedModel) {
+    const requested = typeof requestedModel === 'string' && requestedModel.trim()
+        ? requestedModel
+        : '<empty>';
+    const normalized = typeof normalizedModel === 'string' && normalizedModel.trim()
+        ? normalizedModel
+        : requested;
+    const normalizationHint = normalized !== requested ? ` Resolved as '${normalized}'.` : '';
+    const supportedModels = GEMINI_MODELS.join(', ');
+    const error = new Error(`[Gemini] Unsupported model '${requested}'.${normalizationHint} Supported models: ${supportedModels}`);
+    error.statusCode = 400;
+    error.code = 400;
+    return error;
+}
+
+function resolve_gemini_model(model) {
+    if (typeof model !== 'string' || !model.trim()) {
+        throw createUnsupportedModelError(model);
+    }
+    const normalizedModel = normalizeProviderModel(MODEL_PROVIDER.GEMINI_CLI, model);
+    if (!isProviderModelSupported(MODEL_PROVIDER.GEMINI_CLI, normalizedModel) || normalizedModel.startsWith('anti-')) {
+        throw createUnsupportedModelError(model, normalizedModel);
+    }
+    return normalizedModel;
+}
 
 function is_anti_truncation_model(model) {
-    return ANTI_TRUNCATION_MODELS.some(antiModel => model.includes(antiModel));
+    if (typeof model !== 'string' || !model.startsWith('anti-')) {
+        return false;
+    }
+    const originalModel = normalizeProviderModel(MODEL_PROVIDER.GEMINI_CLI, model.substring(5));
+    return isProviderModelSupported(MODEL_PROVIDER.GEMINI_CLI, originalModel);
 }
 
 // 从防截断模型名中提取实际模型名
 function extract_model_from_anti_model(model) {
-    if (model.startsWith('anti-')) {
-        const originalModel = model.substring(5); // 移除 'anti-' 前缀
-        if (GEMINI_MODELS.includes(originalModel)) {
-            return originalModel;
-        }
+    if (typeof model === 'string' && model.startsWith('anti-')) {
+        return normalizeProviderModel(MODEL_PROVIDER.GEMINI_CLI, model.substring(5));
     }
-    return model; // 如果不是anti-前缀或不在原模型列表中，则返回原模型名
+    return model;
 }
 
 function toGeminiApiResponse(codeAssistResponse) {
@@ -472,6 +498,10 @@ export class GeminiApiService {
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000; // 1 second base delay
 
         try {
+            if (body?.model) {
+                logger.info(`[Gemini API] Dispatch ${method} | model=${body.model} | project=${body.project || this.projectId || 'unknown'}`);
+            }
+
             const requestOptions = {
                 url: `${this.codeAssistEndpoint}/${this.apiVersion}:${method}`,
                 method: "POST",
@@ -485,11 +515,19 @@ export class GeminiApiService {
             const status = error.response?.status;
             const errorCode = error.code;
             const errorMessage = error.message || '';
+            const errorDetails = error.response?.data;
             
             // 检查是否为可重试的网络错误
             const isNetworkError = isRetryableNetworkError(error);
             
             logger.error(`[Gemini API] Error calling (Status: ${status}, Code: ${errorCode}):`, errorMessage);
+            if (errorDetails) {
+                try {
+                    logger.error(`[Gemini API] Upstream error details: ${JSON.stringify(errorDetails)}`);
+                } catch (_e) {
+                    logger.error(`[Gemini API] Upstream error details (raw): ${String(errorDetails)}`);
+                }
+            }
 
             // Handle 401 (Unauthorized) - refresh auth and retry once
             if ((status === 400 || status === 401) && !isRetry) {
@@ -545,6 +583,10 @@ export class GeminiApiService {
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000; // 1 second base delay
 
         try {
+            if (body?.model) {
+                logger.info(`[Gemini API] Dispatch ${method} (stream) | model=${body.model} | project=${body.project || this.projectId || 'unknown'}`);
+            }
+
             const requestOptions = {
                 url: `${this.codeAssistEndpoint}/${this.apiVersion}:${method}`,
                 method: "POST",
@@ -564,11 +606,19 @@ export class GeminiApiService {
             const status = error.response?.status;
             const errorCode = error.code;
             const errorMessage = error.message || '';
+            const errorDetails = error.response?.data;
             
             // 检查是否为可重试的网络错误
             const isNetworkError = isRetryableNetworkError(error);
             
             logger.error(`[Gemini API] Error during stream (Status: ${status}, Code: ${errorCode}):`, errorMessage);
+            if (errorDetails) {
+                try {
+                    logger.error(`[Gemini API] Upstream stream error details: ${JSON.stringify(errorDetails)}`);
+                } catch (_e) {
+                    logger.error(`[Gemini API] Upstream stream error details (raw): ${String(errorDetails)}`);
+                }
+            }
 
             // Handle 401 (Unauthorized) - refresh auth and retry once
             if ((status === 400 || status === 401) && !isRetry) {
@@ -657,10 +707,9 @@ export class GeminiApiService {
             }
         }
         
-        let selectedModel = model;
-        if (!GEMINI_MODELS.includes(model)) {
-            logger.warn(`[Gemini] Model '${model}' not found. Using default model: '${GEMINI_MODELS[0]}'`);
-            selectedModel = GEMINI_MODELS[0];
+        const selectedModel = resolve_gemini_model(model);
+        if (selectedModel !== model) {
+            logger.info(`[Gemini] Model normalized: '${model}' -> '${selectedModel}'`);
         }
         const processedRequestBody = ensureRolesInContents(requestBody);
         const apiRequest = { model: selectedModel, project: this.projectId, request: processedRequestBody };
@@ -692,15 +741,22 @@ export class GeminiApiService {
         if (is_anti_truncation_model(model)) {
             // 从防截断模型名中提取实际模型名
             const actualModel = extract_model_from_anti_model(model);
+            if (!isProviderModelSupported(MODEL_PROVIDER.GEMINI_CLI, actualModel)) {
+                throw createUnsupportedModelError(model, `anti-${actualModel}`);
+            }
             // 使用防截断流处理
             const processedRequestBody = ensureRolesInContents(requestBody);
             yield* apply_anti_truncation_to_stream(this, actualModel, processedRequestBody);
         } else {
+            if (typeof model === 'string' && model.startsWith('anti-')) {
+                const normalizedBaseModel = normalizeProviderModel(MODEL_PROVIDER.GEMINI_CLI, model.substring(5));
+                throw createUnsupportedModelError(model, `anti-${normalizedBaseModel}`);
+            }
+
             // 正常流处理
-            let selectedModel = model;
-            if (!GEMINI_MODELS.includes(model)) {
-                logger.warn(`[Gemini] Model '${model}' not found. Using default model: '${GEMINI_MODELS[0]}'`);
-                selectedModel = GEMINI_MODELS[0];
+            const selectedModel = resolve_gemini_model(model);
+            if (selectedModel !== model) {
+                logger.info(`[Gemini] Model normalized: '${model}' -> '${selectedModel}'`);
             }
             const processedRequestBody = ensureRolesInContents(requestBody);
             const apiRequest = { model: selectedModel, project: this.projectId, request: processedRequestBody };

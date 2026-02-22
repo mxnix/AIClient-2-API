@@ -629,55 +629,30 @@ export class OpenAIConverter extends BaseConverter {
             }
         }
 
+        const { systemInstruction: mergedSystemInstruction, nonSystemMessages } = extractSystemMessages(messages);
         const processedMessages = [];
-        let systemInstruction = null;
+        let systemInstruction = mergedSystemInstruction;
 
-        for (let i = 0; i < messages.length; i++) {
-            const message = messages[i];
+        // Backward compatibility: when the request contains only system/developer messages,
+        // keep previous behavior and convert them into a single user message.
+        const hasOnlySystemLikeMessages =
+            nonSystemMessages.length === 0 &&
+            messages.some(message => message?.role === 'system' || message?.role === 'developer');
+
+        if (hasOnlySystemLikeMessages && mergedSystemInstruction?.parts?.[0]?.text) {
+            systemInstruction = null;
+            processedMessages.push({
+                role: 'user',
+                parts: [{ text: mergedSystemInstruction.parts[0].text }]
+            });
+        }
+
+        for (let i = 0; i < nonSystemMessages.length; i++) {
+            const message = nonSystemMessages[i];
             const role = message.role;
             const content = message.content;
 
-            if (role === 'system') {
-                // system -> system_instruction
-                if (messages.length > 1) {
-                    if (typeof content === 'string') {
-                        systemInstruction = {
-                            role: 'user',
-                            parts: [{ text: content }]
-                        };
-                    } else if (Array.isArray(content)) {
-                        const parts = content
-                            .filter(item => item.type === 'text' && item.text)
-                            .map(item => ({ text: item.text }));
-                        if (parts.length > 0) {
-                            systemInstruction = {
-                                role: 'user',
-                                parts: parts
-                            };
-                        }
-                    } else if (typeof content === 'object' && content.type === 'text') {
-                        systemInstruction = {
-                            role: 'user',
-                            parts: [{ text: content.text }]
-                        };
-                    }
-                } else {
-                    // 只有一条 system 消息时，作为 user 消息处理
-                    const node = { role: 'user', parts: [] };
-                    if (typeof content === 'string') {
-                        node.parts.push({ text: content });
-                    } else if (Array.isArray(content)) {
-                        for (const item of content) {
-                            if (item.type === 'text' && item.text) {
-                                node.parts.push({ text: item.text });
-                            }
-                        }
-                    }
-                    if (node.parts.length > 0) {
-                        processedMessages.push(node);
-                    }
-                }
-            } else if (role === 'user') {
+            if (role === 'user') {
                 // user -> user content
                 const node = { role: 'user', parts: [] };
                 if (typeof content === 'string') {
