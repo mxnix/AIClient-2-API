@@ -14,11 +14,11 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Node.js](https://img.shields.io/badge/Node.js-≥20.0.0-green.svg)](https://nodejs.org/)
-[![Docker](https://img.shields.io/badge/docker-≥20.0.0-blue.svg)](https://hub.docker.com/r/justlikemaki/aiclient-2-api)
-[![GitHub stars](https://img.shields.io/github/stars/justlovemaki/AIClient-2-API.svg?style=flat&label=Star)](https://github.com/justlovemaki/AIClient-2-API/stargazers)
-[![GitHub issues](https://img.shields.io/github/issues/justlovemaki/AIClient-2-API.svg)](https://github.com/justlovemaki/AIClient-2-API/issues)
+[![Docker](https://img.shields.io/badge/docker-≥20.0.0-blue.svg)](https://hub.docker.com/r/mxnix/aiclient-2-api)
+[![GitHub stars](https://img.shields.io/github/stars/mxnix/AIClient-2-API.svg?style=flat&label=Star)](https://github.com/mxnix/AIClient-2-API/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/mxnix/AIClient-2-API.svg)](https://github.com/mxnix/AIClient-2-API/issues)
 
-[**🔧 OpenClaw 配置**](./docs/OPENCLAW_CONFIG_GUIDE-ZH.md) | [**👉 中文**](./README-ZH.md) | [English](./README.md) | [日本語](./README-JA.md) | [**📚 完整文档**](https://aiproxy.justlikemaki.vip/zh/)
+[**🔧 OpenClaw 配置**](./docs/OPENCLAW_CONFIG_GUIDE-ZH.md) | [**👉 中文**](./README-ZH.md) | [English](./README.md) | [日本語](./README-JA.md) | [Русский](./README-RU.md) | [**📚 完整文档**](https://aiproxy.justlikemaki.vip/zh/)
 
 </div>
 
@@ -41,7 +41,7 @@
 > - **2026.01.03** - 新增主题切换功能并优化提供商池初始化，移除使用提供商默认配置的降级策略
 > - **2025.12.30** - 添加主进程管理和自动更新功能
 > - **2025.12.25** - 配置文件统一管理：所有配置集中到 `configs/` 目录，Docker 用户需更新挂载路径为 `-v "本地路径:/app/configs"`
-> - **2025.12.11** - Docker 镜像自动构建并发布到 Docker Hub: [justlikemaki/aiclient-2-api](https://hub.docker.com/r/justlikemaki/aiclient-2-api)
+> - **2025.12.11** - Docker 镜像自动构建并发布到 Docker Hub: [mxnix/aiclient-2-api](https://hub.docker.com/r/mxnix/aiclient-2-api)
 > - **2025.11.30** - 新增 Antigravity 协议支持，支持通过 Google 内部接口访问 Gemini 3 Pro、Claude Sonnet 4.5 等模型
 > - **2025.11.16** - 新增 Ollama 协议支持，统一接口访问所有支持的模型（Claude、Gemini、Qwen、OpenAI等）
 > - **2025.11.11** - 新增 Web UI 管理控制台，支持实时配置管理和健康状态监控
@@ -87,7 +87,7 @@
 
 - [💡 核心优势](#-核心优势)
 - [🚀 快速启动](#-快速启动)
-  - [🐳 Docker 部署](https://hub.docker.com/r/justlikemaki/aiclient-2-api)
+  - [🐳 Docker 部署](https://hub.docker.com/r/mxnix/aiclient-2-api)
   - [📋 核心功能](#-核心功能)
 - [🔐 授权配置指南](#-授权配置指南)
 - [📁 授权文件存储路径](#-授权文件存储路径)
@@ -109,7 +109,7 @@
 #### 🐳 Docker 快捷启动 (推荐)
 
 ```bash
-docker run -d -p 3000:3000 -p 8085-8087:8085-8087 -p 1455:1455 -p 19876-19880:19876-19880 --restart=always -v "指定路径:/app/configs" --name aiclient2api justlikemaki/aiclient-2-api
+docker run -d -p 3000:3000 -p 8085-8087:8085-8087 -p 1455:1455 -p 19876-19880:19876-19880 --restart=always -v "指定路径:/app/configs" --name aiclient2api mxnix/aiclient-2-api
 ```
 
 **参数说明**：
@@ -130,7 +130,7 @@ docker compose up -d
 ```
 
 如需从源码构建而非使用预构建镜像，请编辑 `docker-compose.yml`：
-1. 注释掉 `image: justlikemaki/aiclient-2-api:latest` 行
+1. 注释掉 `image: mxnix/aiclient-2-api:latest` 行
 2. 取消 `build:` 部分的注释
 3. 运行 `docker compose up -d --build`
 
@@ -561,7 +561,7 @@ kill -9 <PID>
 - **检查日志**：`docker logs aiclient2api` 查看错误信息
 - **检查挂载路径**：确保 `-v` 参数中的本地路径存在且有读写权限
 - **检查端口冲突**：确保所有映射的端口在宿主机上未被占用
-- **重新拉取镜像**：`docker pull justlikemaki/aiclient-2-api:latest`
+- **重新拉取镜像**：`docker pull mxnix/aiclient-2-api:latest`
 
 ### 4. 凭据文件无法识别
 
@@ -681,7 +681,7 @@ kill -9 <PID>
 
 感谢以下所有为 AIClient-2-API 项目做出贡献的开发者：
 
-[![Contributors](https://contrib.rocks/image?repo=justlovemaki/AIClient-2-API)](https://github.com/justlovemaki/AIClient-2-API/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=mxnix/AIClient-2-API)](https://github.com/mxnix/AIClient-2-API/graphs/contributors)
 
 ### 赞助者列表
 
@@ -706,7 +706,7 @@ kill -9 <PID>
 ### 🌟 Star History
 
 
-[![Star History Chart](https://api.star-history.com/svg?repos=justlovemaki/AIClient-2-API&type=Timeline)](https://www.star-history.com/#justlovemaki/AIClient-2-API&Timeline)
+[![Star History Chart](https://api.star-history.com/svg?repos=mxnix/AIClient-2-API&type=Timeline)](https://www.star-history.com/#mxnix/AIClient-2-API&Timeline)
 
 ---
 
@@ -723,3 +723,4 @@ kill -9 <PID>
 
 ### 法律合规提醒
 用户在使用本项目时，应遵守所在国家/地区的法律法规。严禁将本项目用于任何非法用途。如因用户违反法律法规而导致的任何后果，由用户自行承担全部责任。
+

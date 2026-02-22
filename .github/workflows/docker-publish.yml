@@ -1,6 +1,7 @@
 name: 构建并发布 Docker 镜像
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main

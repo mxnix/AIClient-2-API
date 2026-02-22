@@ -100,7 +100,7 @@ function compareVersions(v1, v2) {
  * @returns {Promise<string|null>} 最新版本号或 null
  */
 async function getLatestVersionFromGitHub() {
-    const GITHUB_REPO = 'justlovemaki/AIClient-2-API';
+    const GITHUB_REPO = 'mxnix/AIClient-2-API';
     const apiUrl = `https://gh-proxy.org/https://api.github.com/repos/${GITHUB_REPO}/tags`;
     
     try {
@@ -352,7 +352,7 @@ export async function performUpdate() {
  * @returns {Promise<Object>} 更新结果
  */
 async function performTarballUpdate(localVersion, latestTag) {
-    const GITHUB_REPO = 'justlovemaki/AIClient-2-API';
+    const GITHUB_REPO = 'mxnix/AIClient-2-API';
     const tarballUrl = `https://gh-proxy.org/https://github.com/${GITHUB_REPO}/archive/refs/tags/${latestTag}.tar.gz`;
     const appDir = process.cwd();
     const tempDir = path.join(appDir, '.update_temp');
