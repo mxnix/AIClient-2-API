@@ -14,7 +14,7 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Node.js](https://img.shields.io/badge/Node.js-≥20.0.0-green.svg)](https://nodejs.org/)
-[![Docker](https://img.shields.io/badge/docker-≥20.0.0-blue.svg)](https://hub.docker.com/r/mxnix/aiclient-2-api)
+[![Docker](https://img.shields.io/badge/docker-≥20.0.0-blue.svg)](https://hub.docker.com/r/nikzmx/aiclient-2-api)
 [![GitHub stars](https://img.shields.io/github/stars/mxnix/AIClient-2-API.svg?style=flat&label=Star)](https://github.com/mxnix/AIClient-2-API/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/mxnix/AIClient-2-API.svg)](https://github.com/mxnix/AIClient-2-API/issues)
 
@@ -41,7 +41,7 @@
 > - **2026.01.03** - Добавлено переключение тем и оптимизирована инициализация пула провайдеров, удалена стратегия fallback на дефолтную конфигурацию провайдера
 > - **2025.12.30** - Добавлены управление главным процессом и функция автообновления
 > - **2025.12.25** - Унифицировано управление конфигами: все конфиги централизованы в директории `configs/`. Пользователям Docker нужно обновить путь монтирования на `-v "local_path:/app/configs"`
-> - **2025.12.11** - Автоматически собранные Docker-образы доступны на Docker Hub: [mxnix/aiclient-2-api](https://hub.docker.com/r/mxnix/aiclient-2-api)
+> - **2025.12.11** - Автоматически собранные Docker-образы доступны на Docker Hub: [nikzmx/aiclient-2-api](https://hub.docker.com/r/nikzmx/aiclient-2-api)
 > - **2025.11.30** - Добавлена поддержка протокола Antigravity: доступ к Gemini 3 Pro, Claude Sonnet 4.5 и другим моделям через внутренние интерфейсы Google
 > - **2025.11.16** - Добавлена поддержка протокола Ollama: единый интерфейс доступа ко всем поддерживаемым моделям (Claude, Gemini, Qwen, OpenAI и т.д.)
 > - **2025.11.11** - Добавлена Web UI консоль управления с поддержкой управления конфигурацией в реальном времени и мониторинга состояния
@@ -88,7 +88,7 @@
 
 - [💡 Ключевые преимущества](#-ключевые-преимущества)
 - [🚀 Быстрый старт](#-быстрый-старт)
-  - [🐳 Docker развертывание](https://hub.docker.com/r/mxnix/aiclient-2-api)
+  - [🐳 Docker развертывание](https://hub.docker.com/r/nikzmx/aiclient-2-api)
   - [📋 Основные возможности](#-основные-возможности)
 - [🔐 Руководство по настройке авторизации](#-руководство-по-настройке-авторизации)
 - [📁 Пути хранения файлов авторизации](#-пути-хранения-файлов-авторизации)
@@ -110,7 +110,7 @@
 #### 🐳 Быстрый запуск Docker (рекомендуется)
 
 ```bash
-docker run -d -p 3000:3000 -p 8085-8087:8085-8087 -p 1455:1455 -p 19876-19880:19876-19880 --restart=always -v "your_path:/app/configs" --name aiclient2api mxnix/aiclient-2-api
+docker run -d -p 3000:3000 -p 8085-8087:8085-8087 -p 1455:1455 -p 19876-19880:19876-19880 --restart=always -v "your_path:/app/configs" --name aiclient2api nikzmx/aiclient-2-api
 ```
 
 **Описание параметров**:
@@ -131,7 +131,7 @@ docker compose up -d
 ```
 
 Чтобы собирать из исходников вместо готового образа, отредактируйте `docker-compose.yml`:
-1. Закомментируйте строку `image: mxnix/aiclient-2-api:latest`
+1. Закомментируйте строку `image: nikzmx/aiclient-2-api:latest`
 2. Раскомментируйте секцию `build:`
 3. Выполните `docker compose up -d --build`
 
@@ -562,7 +562,7 @@ kill -9 <PID>
 - **Проверьте логи**: `docker logs aiclient2api` для просмотра ошибки
 - **Проверьте путь монтирования**: убедитесь, что локальный путь в параметре `-v` существует и имеет права на чтение/запись
 - **Проверьте конфликт портов**: убедитесь, что все проброшенные порты на хосте свободны
-- **Перетяните образ заново**: `docker pull mxnix/aiclient-2-api:latest`
+- **Перетяните образ заново**: `docker pull nikzmx/aiclient-2-api:latest`
 
 ### 4. Файл учетных данных не распознается
 
@@ -727,5 +727,7 @@ kill -9 <PID>
 
 ### Напоминание о соблюдении законодательства
 Пользователь обязан соблюдать законы и нормативные требования своей страны/региона при использовании проекта. Строго запрещено использовать проект в незаконных целях. Все последствия нарушения законодательства полностью несет пользователь.
+
+
 
 

@@ -14,7 +14,7 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Node.js](https://img.shields.io/badge/Node.js-≥20.0.0-green.svg)](https://nodejs.org/)
-[![Docker](https://img.shields.io/badge/docker-≥20.0.0-blue.svg)](https://hub.docker.com/r/mxnix/aiclient-2-api)
+[![Docker](https://img.shields.io/badge/docker-≥20.0.0-blue.svg)](https://hub.docker.com/r/nikzmx/aiclient-2-api)
 [![GitHub stars](https://img.shields.io/github/stars/mxnix/AIClient-2-API.svg?style=flat&label=Star)](https://github.com/mxnix/AIClient-2-API/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/mxnix/AIClient-2-API.svg)](https://github.com/mxnix/AIClient-2-API/issues)
 
@@ -41,7 +41,7 @@
 > - **2026.01.03** - Added theme switching functionality and optimized provider pool initialization, removed the fallback strategy of using provider default configuration
 > - **2025.12.30** - Added main process management and automatic update functionality
 > - **2025.12.25** - Unified configuration management: All configs centralized to `configs/` directory. Docker users need to update mount path to `-v "local_path:/app/configs"`
-> - **2025.12.11** - Automatically built Docker images are now available on Docker Hub: [mxnix/aiclient-2-api](https://hub.docker.com/r/mxnix/aiclient-2-api)
+> - **2025.12.11** - Automatically built Docker images are now available on Docker Hub: [nikzmx/aiclient-2-api](https://hub.docker.com/r/nikzmx/aiclient-2-api)
 > - **2025.11.30** - Added Antigravity protocol support, enabling access to Gemini 3 Pro, Claude Sonnet 4.5, and other models via Google internal interfaces
 > - **2025.11.16** - Added Ollama protocol support, unified interface to access all supported models (Claude, Gemini, Qwen, OpenAI, etc.)
 > - **2025.11.11** - Added Web UI management console, supporting real-time configuration management and health status monitoring
@@ -88,7 +88,7 @@
 
 - [💡 Core Advantages](#-core-advantages)
 - [🚀 Quick Start](#-quick-start)
-  - [🐳 Docker Deployment](https://hub.docker.com/r/mxnix/aiclient-2-api)
+  - [🐳 Docker Deployment](https://hub.docker.com/r/nikzmx/aiclient-2-api)
   - [📋 Core Features](#-core-features)
 - [🔐 Authorization Configuration Guide](#-authorization-configuration-guide)
 - [📁 Authorization File Storage Paths](#-authorization-file-storage-paths)
@@ -110,7 +110,7 @@ The most recommended way to use AIClient-2-API is to start it through an automat
 #### 🐳 Docker Quick Start (Recommended)
 
 ```bash
-docker run -d -p 3000:3000 -p 8085-8087:8085-8087 -p 1455:1455 -p 19876-19880:19876-19880 --restart=always -v "your_path:/app/configs" --name aiclient2api mxnix/aiclient-2-api
+docker run -d -p 3000:3000 -p 8085-8087:8085-8087 -p 1455:1455 -p 19876-19880:19876-19880 --restart=always -v "your_path:/app/configs" --name aiclient2api nikzmx/aiclient-2-api
 ```
 
 **Parameter Description**:
@@ -131,7 +131,7 @@ docker compose up -d
 ```
 
 To build from source instead of using the pre-built image, edit `docker-compose.yml`:
-1. Comment out the `image: mxnix/aiclient-2-api:latest` line
+1. Comment out the `image: nikzmx/aiclient-2-api:latest` line
 2. Uncomment the `build:` section
 3. Run `docker compose up -d --build`
 
@@ -562,7 +562,7 @@ Or modify the port configuration in `configs/config.json` to use a different por
 - **Check Logs**: `docker logs aiclient2api` to view error messages
 - **Check Mount Path**: Ensure the local path in the `-v` parameter exists and has read/write permissions
 - **Check Port Conflicts**: Ensure all mapped ports are not occupied on the host
-- **Re-pull Image**: `docker pull mxnix/aiclient-2-api:latest`
+- **Re-pull Image**: `docker pull nikzmx/aiclient-2-api:latest`
 
 ### 4. Credential File Not Recognized
 
@@ -727,4 +727,6 @@ This project runs locally and does not collect or upload any user data. However,
 
 ### Legal Compliance Reminder
 Users should comply with the laws and regulations of their country/region when using this project. It is strictly prohibited to use this project for any illegal purposes. Any consequences resulting from users' violation of laws and regulations shall be borne by the users themselves.
+
+
 

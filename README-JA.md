@@ -14,7 +14,7 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Node.js](https://img.shields.io/badge/Node.js-≥20.0.0-green.svg)](https://nodejs.org/)
-[![Docker](https://img.shields.io/badge/docker-≥20.0.0-blue.svg)](https://hub.docker.com/r/mxnix/aiclient-2-api)
+[![Docker](https://img.shields.io/badge/docker-≥20.0.0-blue.svg)](https://hub.docker.com/r/nikzmx/aiclient-2-api)
 [![GitHub stars](https://img.shields.io/github/stars/mxnix/AIClient-2-API.svg?style=flat&label=Star)](https://github.com/mxnix/AIClient-2-API/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/mxnix/AIClient-2-API.svg)](https://github.com/mxnix/AIClient-2-API/issues)
 
@@ -41,7 +41,7 @@
 > - **2026.01.03** - テーマ切替機能を追加し、プロバイダープール初期化を最適化、プロバイダーのデフォルト設定を使用するフォールバック戦略を削除
 > - **2025.12.30** - メインプロセス管理と自動更新機能を追加
 > - **2025.12.25** - 設定ファイル統一管理：すべての設定を `configs/` ディレクトリに集約。Dockerユーザーはマウントパスを `-v "ローカルパス:/app/configs"` に更新が必要
-> - **2025.12.11** - Dockerイメージが自動的にビルドされ、Docker Hubで公開されました: [mxnix/aiclient-2-api](https://hub.docker.com/r/mxnix/aiclient-2-api)
+> - **2025.12.11** - Dockerイメージが自動的にビルドされ、Docker Hubで公開されました: [nikzmx/aiclient-2-api](https://hub.docker.com/r/nikzmx/aiclient-2-api)
 > - **2025.11.30** - Antigravityプロトコルサポートの追加、Google内部インターフェース経由でGemini 3 Pro、Claude Sonnet 4.5などのモデルへのアクセスをサポート
 > - **2025.11.16** - Ollamaプロトコルサポートの追加、統一インターフェースでサポートされるすべてのモデルにアクセス
 > - **2025.11.11** - Web UI管理コントロールコンソールの追加、リアルタイム設定管理と健康状態モニタリングをサポート
@@ -88,7 +88,7 @@
 
 - [💡 コアアドバンテージ](#-コアアドバンテージ)
 - [🚀 クイックスタート](#-クイックスタート)
-  - [🐳 Docker デプロイ](https://hub.docker.com/r/mxnix/aiclient-2-api)
+  - [🐳 Docker デプロイ](https://hub.docker.com/r/nikzmx/aiclient-2-api)
   - [📋 コア機能](#-コア機能)
 - [🔐 認証設定ガイド](#-認証設定ガイド)
 - [📁 認証ファイル保存パス](#-認証ファイル保存パス)
@@ -110,7 +110,7 @@ AIClient-2-APIを使い始める最も推奨される方法は、自動起動ス
 #### 🐳 Docker クイックスタート (推奨)
 
 ```bash
-docker run -d -p 3000:3000 -p 8085-8087:8085-8087 -p 1455:1455 -p 19876-19880:19876-19880 --restart=always -v "指定パス:/app/configs" --name aiclient2api mxnix/aiclient-2-api
+docker run -d -p 3000:3000 -p 8085-8087:8085-8087 -p 1455:1455 -p 19876-19880:19876-19880 --restart=always -v "指定パス:/app/configs" --name aiclient2api nikzmx/aiclient-2-api
 ```
 
 **パラメータ説明**：
@@ -131,7 +131,7 @@ docker compose up -d
 ```
 
 プリビルドイメージの代わりにソースからビルドする場合は、`docker-compose.yml` を編集してください：
-1. `image: mxnix/aiclient-2-api:latest` 行をコメントアウト
+1. `image: nikzmx/aiclient-2-api:latest` 行をコメントアウト
 2. `build:` セクションのコメントを解除
 3. `docker compose up -d --build` を実行
 
@@ -562,7 +562,7 @@ kill -9 <PID>
 - **ログを確認**：`docker logs aiclient2api` でエラーメッセージを確認
 - **マウントパスを確認**：`-v` パラメータのローカルパスが存在し、読み書き権限があることを確認
 - **ポート競合を確認**：マッピングされたすべてのポートがホストで占有されていないことを確認
-- **イメージを再取得**：`docker pull mxnix/aiclient-2-api:latest`
+- **イメージを再取得**：`docker pull nikzmx/aiclient-2-api:latest`
 
 ### 4. 認証情報ファイルが認識されない
 
@@ -727,4 +727,6 @@ AIClient-2-APIプロジェクトに貢献してくれたすべての開発者に
 
 ### 法的コンプライアンスの注意
 ユーザーは本プロジェクト使用時、所在国/地域の法律法規を遵守する必要があります。本プロジェクトを違法な目的に使用することは厳禁です。ユーザーが法律法規に違反したことによるいかなる結果も、ユーザー自身がすべての責任を負うものとします。
+
+
 
