@@ -1599,7 +1599,7 @@ const translations = {
 };
 
 // 当前语言
-let currentLanguage = localStorage.getItem('language') || 'zh-CN';
+let currentLanguage = localStorage.getItem('language') || 'en-US';
 
 // 获取翻译文本
 export function t(key, params = {}) {
