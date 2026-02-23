@@ -1,0 +1,11 @@
+{
+  "display_name": "AIClient Usage Panel",
+  "author": "mxtyu",
+  "version": "0.1.0",
+  "loading_order": 15,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "homePage": "https://github.com/mxtyu/AIClient-2-API"
+}

@@ -1,0 +1,7 @@
+{
+  "baseUrl": "http://127.0.0.1:3000",
+  "password": "admin123",
+  "provider": "gemini-cli-oauth",
+  "cacheMs": 15000,
+  "timeoutMs": 15000
+}

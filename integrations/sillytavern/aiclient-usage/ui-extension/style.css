@@ -1,0 +1,151 @@
+#aicu-panel {
+    border: 1px solid var(--SmartThemeBorderColor, #3a3a3a);
+    border-radius: 10px;
+    padding: 12px;
+    margin-top: 12px;
+    background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.2));
+}
+
+.aicu-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.aicu-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.aicu-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.aicu-field input,
+.aicu-field select {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--SmartThemeBodyColor, #1e1e1e);
+    color: var(--SmartThemeEmColor, #e9e9e9);
+    border: 1px solid var(--SmartThemeBorderColor, #4a4a4a);
+    border-radius: 6px;
+    padding: 6px 8px;
+}
+
+.aicu-field input::placeholder {
+    color: var(--SmartThemeQuoteColor, #9b9b9b);
+    opacity: 0.9;
+}
+
+.aicu-field select option {
+    background: var(--SmartThemeBodyColor, #1e1e1e);
+    color: var(--SmartThemeEmColor, #e9e9e9);
+}
+
+.aicu-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.aicu-status {
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+    opacity: 0.9;
+}
+
+.aicu-status.error {
+    color: #ff7f7f;
+}
+
+.aicu-status.success {
+    color: #8fffb2;
+}
+
+.aicu-status.info {
+    color: #9dd1ff;
+}
+
+.aicu-summary {
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+    opacity: 0.85;
+}
+
+.aicu-instance {
+    border: 1px solid var(--SmartThemeBorderColor, #3a3a3a);
+    border-radius: 8px;
+    padding: 8px;
+    margin-bottom: 8px;
+    background: rgba(0, 0, 0, 0.15);
+}
+
+.aicu-instance-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    gap: 8px;
+}
+
+.aicu-instance-name {
+    font-weight: 600;
+    word-break: break-all;
+}
+
+.aicu-instance-badge {
+    font-size: 0.8rem;
+    opacity: 0.9;
+}
+
+.aicu-instance-badge.ok {
+    color: #8fffb2;
+}
+
+.aicu-instance-badge.fail {
+    color: #ff8f8f;
+}
+
+.aicu-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) auto auto;
+    gap: 8px;
+    align-items: center;
+    font-size: 0.9rem;
+    margin-bottom: 4px;
+}
+
+.aicu-row-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.aicu-row-usage {
+    font-family: monospace;
+}
+
+.aicu-row-reset {
+    opacity: 0.7;
+    font-size: 0.8rem;
+}
+
+.aicu-empty {
+    opacity: 0.7;
+    font-size: 0.9rem;
+}
+
+@media (max-width: 900px) {
+    .aicu-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .aicu-row {
+        grid-template-columns: 1fr;
+        gap: 2px;
+    }
+}

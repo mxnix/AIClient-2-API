@@ -1,0 +1,8 @@
+{
+  "name": "aiclient-usage-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SillyTavern server plugin bridge for AIClient usage data",
+  "main": "index.js",
+  "license": "MIT"
+}
