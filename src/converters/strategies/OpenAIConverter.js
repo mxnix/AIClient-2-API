@@ -629,7 +629,11 @@ export class OpenAIConverter extends BaseConverter {
             }
         }
 
-        const { systemInstruction: mergedSystemInstruction, nonSystemMessages } = extractSystemMessages(messages);
+        const { systemInstruction: mergedSystemInstruction, nonSystemMessages } = extractSystemMessages(messages, {
+            // Preserve interleaved system/developer blocks ordering for clients like SillyTavern:
+            // only leading system messages are promoted to Gemini system_instruction.
+            preserveNonLeadingSystem: true
+        });
         const processedMessages = [];
         let systemInstruction = mergedSystemInstruction;
 

@@ -211,19 +211,40 @@ export function extractTextFromMessageContent(content) {
 /**
  * 提取并处理系统消息
  * @param {Array} messages - 消息数组
+ * @param {Object} [options] - 处理选项
+ * @param {boolean} [options.preserveNonLeadingSystem=false]
+ *   当为 true 时，仅将前导 system/developer 消息合并到 systemInstruction。
+ *   对于出现在首条非 system 消息之后的 system/developer，会按顺序降级为 user 消息，
+ *   以保留原始消息时序（用于兼容 SillyTavern 等交错 system 块场景）。
  * @returns {{systemInstruction: Object|null, nonSystemMessages: Array}}
  */
-export function extractAndProcessSystemMessages(messages) {
+export function extractAndProcessSystemMessages(messages, options = {}) {
+    const preserveNonLeadingSystem = options.preserveNonLeadingSystem === true;
     const systemContents = [];
     const nonSystemMessages = [];
+    let seenNonSystemLikeMessage = false;
 
     for (const message of messages) {
-        if (message.role === 'system' || message.role === 'developer') {
+        const isSystemLike = message.role === 'system' || message.role === 'developer';
+        if (isSystemLike) {
             const extractedText = extractTextFromMessageContent(message.content);
-            if (typeof extractedText === 'string' && extractedText.trim()) {
-                systemContents.push(extractedText);
+            const normalizedText = typeof extractedText === 'string' ? extractedText.trim() : '';
+            if (!normalizedText) {
+                continue;
+            }
+
+            if (preserveNonLeadingSystem && seenNonSystemLikeMessage) {
+                // Keep ordering for interleaved system blocks by mapping trailing system/developer
+                // messages to user messages.
+                nonSystemMessages.push({
+                    role: 'user',
+                    content: normalizedText
+                });
+            } else {
+                systemContents.push(normalizedText);
             }
         } else {
+            seenNonSystemLikeMessage = true;
             nonSystemMessages.push(message);
         }
     }

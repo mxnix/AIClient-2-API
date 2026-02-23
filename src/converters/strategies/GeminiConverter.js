@@ -282,7 +282,7 @@ export class GeminiConverter extends BaseConverter {
      * Gemini响应 -> OpenAI响应
      */
     toOpenAIResponse(geminiResponse, model) {
-        const content = this.processGeminiResponseContent(geminiResponse);
+        let content = this.processGeminiResponseContent(geminiResponse);
         
         // 提取 tool_calls
         const toolCalls = [];
@@ -312,6 +312,12 @@ export class GeminiConverter extends BaseConverter {
         // 如果有工具调用，设置 finish_reason 为 tool_calls
         if (toolCalls.length > 0) {
             finishReason = "tool_calls";
+        }
+
+        // Upstream sometimes returns STOP with empty text. Avoid emitting blank assistant
+        // messages to OpenAI-compatible clients (e.g. SillyTavern).
+        if (typeof content === 'string' && !content.trim() && toolCalls.length === 0) {
+            content = this.getEmptyResponseFallbackText(geminiResponse);
         }
         
         const message = {
@@ -421,6 +427,11 @@ export class GeminiConverter extends BaseConverter {
             finishReason = 'tool_calls';
         }
 
+        // Emit a non-empty final chunk when upstream returns STOP with empty text.
+        if (finishReason && !content && toolCalls.length === 0) {
+            content = this.getEmptyResponseFallbackText(geminiChunk);
+        }
+
         // 构建delta对象
         const delta = {};
         if (content) delta.content = content;
@@ -459,6 +470,26 @@ export class GeminiConverter extends BaseConverter {
         }
 
         return chunk;
+    }
+
+    getEmptyResponseFallbackText(geminiPayload) {
+        const finishMessage = this.extractGeminiFinishMessage(geminiPayload);
+        if (finishMessage) {
+            return `[Upstream returned no text. ${finishMessage}]`;
+        }
+        return "[Upstream returned an empty response. Please retry.]";
+    }
+
+    extractGeminiFinishMessage(geminiPayload) {
+        if (!geminiPayload || !Array.isArray(geminiPayload.candidates)) {
+            return '';
+        }
+        for (const candidate of geminiPayload.candidates) {
+            if (typeof candidate?.finishMessage === 'string' && candidate.finishMessage.trim()) {
+                return candidate.finishMessage.trim();
+            }
+        }
+        return '';
     }
 
     /**
