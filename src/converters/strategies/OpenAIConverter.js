@@ -638,12 +638,15 @@ export class OpenAIConverter extends BaseConverter {
         const hasOnlySystemLikeMessages =
             nonSystemMessages.length === 0 &&
             messages.some(message => message?.role === 'system' || message?.role === 'developer');
+        const mergedSystemText = typeof mergedSystemInstruction?.parts?.[0]?.text === 'string'
+            ? mergedSystemInstruction.parts[0].text
+            : '';
 
-        if (hasOnlySystemLikeMessages && mergedSystemInstruction?.parts?.[0]?.text) {
+        if (hasOnlySystemLikeMessages && mergedSystemText.trim()) {
             systemInstruction = null;
             processedMessages.push({
                 role: 'user',
-                parts: [{ text: mergedSystemInstruction.parts[0].text }]
+                parts: [{ text: mergedSystemText }]
             });
         }
 
@@ -872,7 +875,10 @@ export class OpenAIConverter extends BaseConverter {
         }
 
         // 添加 system_instruction
-        if (systemInstruction) {
+        const systemInstructionText = typeof systemInstruction?.parts?.[0]?.text === 'string'
+            ? systemInstruction.parts[0].text
+            : '';
+        if (systemInstructionText.trim()) {
             geminiRequest.system_instruction = systemInstruction;
         }
 

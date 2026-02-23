@@ -184,7 +184,7 @@ export function safeParseJSON(str) {
 
 /**
  * 提取消息内容中的文本
- * @param {string|Array} content - 消息内容
+ * @param {string|Array|Object} content - 消息内容
  * @returns {string} 提取的文本
  */
 export function extractTextFromMessageContent(content) {
@@ -196,6 +196,14 @@ export function extractTextFromMessageContent(content) {
             .filter(part => part.type === 'text' && part.text)
             .map(part => part.text)
             .join('\n');
+    }
+    if (content && typeof content === 'object') {
+        if (content.type === 'text' && typeof content.text === 'string') {
+            return content.text;
+        }
+        if (typeof content.text === 'string') {
+            return content.text;
+        }
     }
     return '';
 }
@@ -211,7 +219,10 @@ export function extractAndProcessSystemMessages(messages) {
 
     for (const message of messages) {
         if (message.role === 'system' || message.role === 'developer') {
-            systemContents.push(extractTextFromMessageContent(message.content));
+            const extractedText = extractTextFromMessageContent(message.content);
+            if (typeof extractedText === 'string' && extractedText.trim()) {
+                systemContents.push(extractedText);
+            }
         } else {
             nonSystemMessages.push(message);
         }

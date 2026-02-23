@@ -215,10 +215,11 @@ export function getProviderForModel(modelName, defaultProvider) {
     }
 
     // First, check if model name has a prefix that directly indicates the provider
-    // const providerFromPrefix = getProviderFromPrefix(modelName);
-    // if (providerFromPrefix) {
-    //     return providerFromPrefix;
-    // }
+    const providerFromPrefix = getProviderFromPrefix(modelName);
+    if (providerFromPrefix) {
+        logger.info(`[Provider Selection] Provider determined from prefix: ${providerFromPrefix}`);
+        return providerFromPrefix;
+    }
     
     // Remove prefix for further analysis
     const cleanModelName = removeModelPrefix(modelName);
@@ -226,7 +227,7 @@ export function getProviderForModel(modelName, defaultProvider) {
     
     // Try to find the provider by checking if the model is in the provider's model list
     // This handles cases where different providers have the same model name
-    const providerType = findProviderByModelName(cleanModelName);
+    const providerType = findProviderByModelName(cleanModelName, defaultProvider);
     logger.info(`[Provider Selection] Provider determined from model list: ${providerType}`);
     if (providerType) {
         return providerType;
@@ -240,9 +241,10 @@ export function getProviderForModel(modelName, defaultProvider) {
 /**
  * Find provider type by checking if the model name is in the provider's model list
  * @param {string} modelName - The model name to look up
+ * @param {string} defaultProvider - The default provider for tie-breaking
  * @returns {string|null} The provider type or null if not found
  */
-function findProviderByModelName(modelName) {
+function findProviderByModelName(modelName, defaultProvider) {
     // Map of provider types to check
     const providerTypes = [
         MODEL_PROVIDER.GEMINI_CLI,
@@ -252,14 +254,25 @@ function findProviderByModelName(modelName) {
         MODEL_PROVIDER.IFLOW_API
     ];
     
-    // Check each provider's model list
-    for (const providerType of providerTypes) {
-        if (isProviderModelSupported(providerType, modelName)) {
-            return providerType;
-        }
+    const matchedProviders = providerTypes.filter(providerType =>
+        isProviderModelSupported(providerType, modelName)
+    );
+
+    if (matchedProviders.length === 0) {
+        return null;
+    }
+
+    if (matchedProviders.length === 1) {
+        return matchedProviders[0];
+    }
+
+    if (defaultProvider && matchedProviders.includes(defaultProvider)) {
+        logger.info(`[Provider Selection] Ambiguous model '${modelName}'. Preferring default provider: ${defaultProvider}`);
+        return defaultProvider;
     }
     
-    return null;
+    logger.info(`[Provider Selection] Ambiguous model '${modelName}'. Providers: ${matchedProviders.join(', ')}. Using first match.`);
+    return matchedProviders[0];
 }
 
 /**
