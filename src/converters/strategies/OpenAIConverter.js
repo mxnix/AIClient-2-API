@@ -868,9 +868,32 @@ export class OpenAIConverter extends BaseConverter {
             // tool 消息已经在 assistant 的 tool_calls 处理中合并了，这里跳过
         }
 
+        // 合并相邻相同 role 的消息（与 Claude 转换逻辑保持一致）
+        const mergedGeminiMessages = [];
+        for (const currentMessage of processedMessages) {
+            if (!currentMessage?.parts?.length) continue;
+            if (mergedGeminiMessages.length === 0) {
+                mergedGeminiMessages.push({
+                    role: currentMessage.role,
+                    parts: [...currentMessage.parts]
+                });
+                continue;
+            }
+
+            const lastMessage = mergedGeminiMessages[mergedGeminiMessages.length - 1];
+            if (lastMessage.role === currentMessage.role) {
+                lastMessage.parts = lastMessage.parts.concat(currentMessage.parts);
+            } else {
+                mergedGeminiMessages.push({
+                    role: currentMessage.role,
+                    parts: [...currentMessage.parts]
+                });
+            }
+        }
+
         // 构建 Gemini 请求
         const geminiRequest = {
-            contents: processedMessages.filter(item => item.parts && item.parts.length > 0)
+            contents: mergedGeminiMessages
         };
 
         // 添加 model
