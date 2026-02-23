@@ -686,26 +686,6 @@ AIClient-2-APIプロジェクトに貢献してくれたすべての開発者に
 
 [![Contributors](https://contrib.rocks/image?repo=mxnix/AIClient-2-API)](https://github.com/mxnix/AIClient-2-API/graphs/contributors)
 
-### スポンサーリスト
-
-プロジェクトをサポートしてくださっているスポンサーの皆様に深く感謝いたします：
-
-- [**Cigarliu**](https://github.com/Cigarliu "9.9")
-- [**xianengqi**](https://github.com/xianengqi "9.9")
-- [**3831143avl**](https://github.com/3831143avl "10")
-- [**醉春風**](https://github.com/handsometong "28.8")
-- [**crazy**](https://github.com/404 "88")
-- [**清宵落了灯花**](https://github.com/Lanternmorning "16")
-- [**郭铁**](https://github.com/guotie "20")
-- [**落叶聚名**](https://github.com/mb5u88-debug "88")
-- [**匿名**](https://github.com/404 "8.88")
-
-### スキャンしてスポンサーになる
-
-あなたのスポンサーシップはプロジェクトの継続的な発展の原動力です ❤️
-
-<img src="static/coffee.png" alt="スキャンしてスポンサーになる" width="200">
-<img src="static/sponsor.png" alt="スキャンしてスポンサーになる" width="200">
 
 ### 🌟 Star History
 
