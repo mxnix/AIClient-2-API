@@ -680,33 +680,6 @@ kill -9 <PID>
 
 Разработка этого проекта во многом вдохновлена официальным Google Gemini CLI, а также частично опирается на реализацию кода `gemini-cli.ts` из Cline 3.18.0. Искренняя благодарность команде Google и команде разработки Cline за отличную работу!
 
-### Список участников
-
-Спасибо всем разработчикам, которые внесли вклад в проект AIClient-2-API:
-
-[![Contributors](https://contrib.rocks/image?repo=mxnix/AIClient-2-API)](https://github.com/mxnix/AIClient-2-API/graphs/contributors)
-
-### Список спонсоров
-
-Мы благодарны нашим спонсорам за поддержку:
-
-- [**Cigarliu**](https://github.com/Cigarliu "9.9")
-- [**xianengqi**](https://github.com/xianengqi "9.9")
-- [**3831143avl**](https://github.com/3831143avl "10")
-- [**醉春风**](https://github.com/handsometong "28.8")
-- [**crazy**](https://github.com/404 "88")
-- [**清宵落了灯花**](https://github.com/Lanternmorning "16")
-- [**郭铁**](https://github.com/guotie "20")
-- [**落叶聚名**](https://github.com/mb5u88-debug "88")
-- [**匿名**](https://github.com/404 "8.88")
-
-### Скан для поддержки
-
-Ваша поддержка - главный двигатель дальнейшего развития проекта ❤️
-
-<img src="static/coffee.png" alt="Scan to Sponsor" width="200">
-<img src="static/sponsor.png" alt="Scan to Sponsor" width="200">
-
 ### 🌟 Star History
 
 
