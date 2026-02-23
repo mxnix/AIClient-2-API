@@ -680,6 +680,12 @@ kill -9 <PID>
 
 Разработка этого проекта во многом вдохновлена официальным Google Gemini CLI, а также частично опирается на реализацию кода `gemini-cli.ts` из Cline 3.18.0. Искренняя благодарность команде Google и команде разработки Cline за отличную работу!
 
+### Список участников
+
+Спасибо всем разработчикам, которые внесли вклад в проект AIClient-2-API:
+
+[![Contributors](https://contrib.rocks/image?repo=mxnix/AIClient-2-API)](https://github.com/mxnix/AIClient-2-API/graphs/contributors)
+
 ### 🌟 Star History
 
 
