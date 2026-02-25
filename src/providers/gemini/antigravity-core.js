@@ -46,6 +46,141 @@ const OAUTH_CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.goo
 const OAUTH_CLIENT_SECRET = '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';
 const DEFAULT_USER_AGENT = 'antigravity/1.104.0 darwin/arm64';
 const REFRESH_SKEW = 3000; // 3000秒（50分钟）提前刷新Token
+const DEFAULT_REQUEST_MAX_RETRIES = 10;
+const QUOTA_BACKOFF_JITTER_RATIO = 0.2;
+
+function parseDurationToMs(rawDuration) {
+    if (rawDuration === undefined || rawDuration === null) {
+        return null;
+    }
+
+    const text = String(rawDuration).trim();
+    const durationMatch = text.match(/^([0-9]+(?:\.[0-9]+)?)(ms|s)$/i);
+    if (!durationMatch) {
+        return null;
+    }
+
+    const value = Number.parseFloat(durationMatch[1]);
+    if (!Number.isFinite(value)) {
+        return null;
+    }
+
+    const unit = durationMatch[2].toLowerCase();
+    const ms = unit === 'ms' ? value : value * 1000;
+    return Math.max(0, Math.round(ms));
+}
+
+function parseRetryAfterHeaderMs(headers) {
+    if (!headers) {
+        return null;
+    }
+
+    let retryAfterValue;
+    if (typeof headers.get === 'function') {
+        retryAfterValue = headers.get('retry-after');
+    } else if (Array.isArray(headers)) {
+        const retryAfterEntry = headers.find((entry) => Array.isArray(entry) && String(entry[0]).toLowerCase() === 'retry-after');
+        retryAfterValue = retryAfterEntry ? retryAfterEntry[1] : undefined;
+    } else if (typeof headers === 'object') {
+        retryAfterValue = headers['retry-after'] ?? headers['Retry-After'];
+    }
+
+    if (Array.isArray(retryAfterValue)) {
+        retryAfterValue = retryAfterValue[0];
+    }
+
+    if (retryAfterValue === undefined || retryAfterValue === null) {
+        return null;
+    }
+
+    const raw = String(retryAfterValue).trim();
+    if (!raw) {
+        return null;
+    }
+
+    if (/^[0-9]+(?:\.[0-9]+)?$/.test(raw)) {
+        return Math.max(0, Math.round(Number.parseFloat(raw) * 1000));
+    }
+
+    const durationMs = parseDurationToMs(raw);
+    if (durationMs !== null) {
+        return durationMs;
+    }
+
+    const parsedDate = Date.parse(raw);
+    if (!Number.isNaN(parsedDate)) {
+        return Math.max(0, parsedDate - Date.now());
+    }
+
+    return null;
+}
+
+function extractRetryDelayFromPayloadMs(payload) {
+    if (payload === undefined || payload === null) {
+        return null;
+    }
+
+    let text;
+    if (typeof payload === 'string') {
+        text = payload;
+    } else {
+        try {
+            text = JSON.stringify(payload);
+        } catch {
+            return null;
+        }
+    }
+
+    if (!text) {
+        return null;
+    }
+
+    const delayCandidates = [];
+    const retryInRegex = /please retry in\s+([0-9]+(?:\.[0-9]+)?(?:ms|s))/ig;
+    let match;
+    while ((match = retryInRegex.exec(text)) !== null) {
+        const parsed = parseDurationToMs(match[1]);
+        if (parsed !== null) {
+            delayCandidates.push(parsed);
+        }
+    }
+
+    const delayFieldRegex = /"(?:retryDelay|quotaResetDelay)"\s*:\s*"([0-9]+(?:\.[0-9]+)?(?:ms|s))"/ig;
+    while ((match = delayFieldRegex.exec(text)) !== null) {
+        const parsed = parseDurationToMs(match[1]);
+        if (parsed !== null) {
+            delayCandidates.push(parsed);
+        }
+    }
+
+    if (delayCandidates.length === 0) {
+        return null;
+    }
+
+    return Math.max(...delayCandidates);
+}
+
+function getQuotaRetryDelayHintMs(error) {
+    const retryAfterHeaderMs = parseRetryAfterHeaderMs(error?.response?.headers);
+    const payloadDelayMs = extractRetryDelayFromPayloadMs(error?.response?.data);
+    const messageDelayMs = extractRetryDelayFromPayloadMs(error?.message);
+
+    const allDelays = [retryAfterHeaderMs, payloadDelayMs, messageDelayMs]
+        .filter((value) => Number.isFinite(value) && value >= 0);
+
+    if (allDelays.length === 0) {
+        return null;
+    }
+
+    return Math.max(...allDelays);
+}
+
+function computeQuotaRetryDelayMs(baseDelay, retryCount, quotaRetryDelayHintMs = null) {
+    const exponentialDelay = baseDelay * Math.pow(2, retryCount);
+    const minimumDelay = Math.max(exponentialDelay, quotaRetryDelayHintMs || 0);
+    const jitter = minimumDelay * QUOTA_BACKOFF_JITTER_RATIO * Math.random();
+    return Math.max(0, Math.round(minimumDelay + jitter));
+}
 
 const ANTIGRAVITY_SYSTEM_PROMPT = `You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.**Absolute paths only****Proactiveness**`;
 
@@ -1128,7 +1263,7 @@ export class AntigravityApiService {
     }
 
     async callApi(method, body, isRetry = false, retryCount = 0, baseURLIndex = 0) {
-        const maxRetries = this.config.REQUEST_MAX_RETRIES || 3;
+        const maxRetries = this.config.REQUEST_MAX_RETRIES || DEFAULT_REQUEST_MAX_RETRIES;
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000;
 
         if (baseURLIndex >= this.baseURLs.length) {
@@ -1185,8 +1320,10 @@ export class AntigravityApiService {
                     logger.info(`[Antigravity API] Rate limited on ${baseURL}. Trying next base URL...`);
                     return this.callApi(method, body, isRetry, retryCount, baseURLIndex + 1);
                 } else if (retryCount < maxRetries) {
-                    const delay = baseDelay * Math.pow(2, retryCount);
-                    logger.info(`[Antigravity API] Rate limited. Retrying in ${delay}ms...`);
+                    const quotaRetryDelayHintMs = getQuotaRetryDelayHintMs(error);
+                    const delay = computeQuotaRetryDelayMs(baseDelay, retryCount, quotaRetryDelayHintMs);
+                    const hintLog = quotaRetryDelayHintMs !== null ? ` (server hint >= ${Math.round(quotaRetryDelayHintMs)}ms)` : '';
+                    logger.info(`[Antigravity API] Rate limited. Retrying in ${delay}ms${hintLog}...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     return this.callApi(method, body, isRetry, retryCount + 1, 0);
                 }
@@ -1219,7 +1356,7 @@ export class AntigravityApiService {
     }
 
     async * streamApi(method, body, isRetry = false, retryCount = 0, baseURLIndex = 0) {
-        const maxRetries = this.config.REQUEST_MAX_RETRIES || 3;
+        const maxRetries = this.config.REQUEST_MAX_RETRIES || DEFAULT_REQUEST_MAX_RETRIES;
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000;
 
         if (baseURLIndex >= this.baseURLs.length) {
@@ -1288,8 +1425,10 @@ export class AntigravityApiService {
                     yield* this.streamApi(method, body, isRetry, retryCount, baseURLIndex + 1);
                     return;
                 } else if (retryCount < maxRetries) {
-                    const delay = baseDelay * Math.pow(2, retryCount);
-                    logger.info(`[Antigravity API] Rate limited during stream. Retrying in ${delay}ms...`);
+                    const quotaRetryDelayHintMs = getQuotaRetryDelayHintMs(error);
+                    const delay = computeQuotaRetryDelayMs(baseDelay, retryCount, quotaRetryDelayHintMs);
+                    const hintLog = quotaRetryDelayHintMs !== null ? ` (server hint >= ${Math.round(quotaRetryDelayHintMs)}ms)` : '';
+                    logger.info(`[Antigravity API] Rate limited during stream. Retrying in ${delay}ms${hintLog}...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     yield* this.streamApi(method, body, isRetry, retryCount + 1, 0);
                     return;

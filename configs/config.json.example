@@ -7,7 +7,7 @@
     "SYSTEM_PROMPT_MODE": "overwrite",
     "PROMPT_LOG_BASE_NAME": "prompt_log",
     "PROMPT_LOG_MODE": "none",
-    "REQUEST_MAX_RETRIES": 3,
+    "REQUEST_MAX_RETRIES": 10,
     "REQUEST_BASE_DELAY": 1000,
     "CRON_NEAR_MINUTES": 1,
     "CRON_REFRESH_TOKEN": false,

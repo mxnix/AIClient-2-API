@@ -37,6 +37,141 @@ const DEFAULT_CODE_ASSIST_API_VERSION = 'v1internal';
 const OAUTH_CLIENT_ID = '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com';
 const OAUTH_CLIENT_SECRET = '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';
 const GEMINI_MODELS = getProviderModels(MODEL_PROVIDER.GEMINI_CLI);
+const DEFAULT_REQUEST_MAX_RETRIES = 10;
+const QUOTA_BACKOFF_JITTER_RATIO = 0.2;
+
+function parseDurationToMs(rawDuration) {
+    if (rawDuration === undefined || rawDuration === null) {
+        return null;
+    }
+
+    const text = String(rawDuration).trim();
+    const durationMatch = text.match(/^([0-9]+(?:\.[0-9]+)?)(ms|s)$/i);
+    if (!durationMatch) {
+        return null;
+    }
+
+    const value = Number.parseFloat(durationMatch[1]);
+    if (!Number.isFinite(value)) {
+        return null;
+    }
+
+    const unit = durationMatch[2].toLowerCase();
+    const ms = unit === 'ms' ? value : value * 1000;
+    return Math.max(0, Math.round(ms));
+}
+
+function parseRetryAfterHeaderMs(headers) {
+    if (!headers) {
+        return null;
+    }
+
+    let retryAfterValue;
+    if (typeof headers.get === 'function') {
+        retryAfterValue = headers.get('retry-after');
+    } else if (Array.isArray(headers)) {
+        const retryAfterEntry = headers.find((entry) => Array.isArray(entry) && String(entry[0]).toLowerCase() === 'retry-after');
+        retryAfterValue = retryAfterEntry ? retryAfterEntry[1] : undefined;
+    } else if (typeof headers === 'object') {
+        retryAfterValue = headers['retry-after'] ?? headers['Retry-After'];
+    }
+
+    if (Array.isArray(retryAfterValue)) {
+        retryAfterValue = retryAfterValue[0];
+    }
+
+    if (retryAfterValue === undefined || retryAfterValue === null) {
+        return null;
+    }
+
+    const raw = String(retryAfterValue).trim();
+    if (!raw) {
+        return null;
+    }
+
+    if (/^[0-9]+(?:\.[0-9]+)?$/.test(raw)) {
+        return Math.max(0, Math.round(Number.parseFloat(raw) * 1000));
+    }
+
+    const durationMs = parseDurationToMs(raw);
+    if (durationMs !== null) {
+        return durationMs;
+    }
+
+    const parsedDate = Date.parse(raw);
+    if (!Number.isNaN(parsedDate)) {
+        return Math.max(0, parsedDate - Date.now());
+    }
+
+    return null;
+}
+
+function extractRetryDelayFromPayloadMs(payload) {
+    if (payload === undefined || payload === null) {
+        return null;
+    }
+
+    let text;
+    if (typeof payload === 'string') {
+        text = payload;
+    } else {
+        try {
+            text = JSON.stringify(payload);
+        } catch {
+            return null;
+        }
+    }
+
+    if (!text) {
+        return null;
+    }
+
+    const delayCandidates = [];
+    const retryInRegex = /please retry in\s+([0-9]+(?:\.[0-9]+)?(?:ms|s))/ig;
+    let match;
+    while ((match = retryInRegex.exec(text)) !== null) {
+        const parsed = parseDurationToMs(match[1]);
+        if (parsed !== null) {
+            delayCandidates.push(parsed);
+        }
+    }
+
+    const delayFieldRegex = /"(?:retryDelay|quotaResetDelay)"\s*:\s*"([0-9]+(?:\.[0-9]+)?(?:ms|s))"/ig;
+    while ((match = delayFieldRegex.exec(text)) !== null) {
+        const parsed = parseDurationToMs(match[1]);
+        if (parsed !== null) {
+            delayCandidates.push(parsed);
+        }
+    }
+
+    if (delayCandidates.length === 0) {
+        return null;
+    }
+
+    return Math.max(...delayCandidates);
+}
+
+function getQuotaRetryDelayHintMs(error) {
+    const retryAfterHeaderMs = parseRetryAfterHeaderMs(error?.response?.headers);
+    const payloadDelayMs = extractRetryDelayFromPayloadMs(error?.response?.data);
+    const messageDelayMs = extractRetryDelayFromPayloadMs(error?.message);
+
+    const allDelays = [retryAfterHeaderMs, payloadDelayMs, messageDelayMs]
+        .filter((value) => Number.isFinite(value) && value >= 0);
+
+    if (allDelays.length === 0) {
+        return null;
+    }
+
+    return Math.max(...allDelays);
+}
+
+function computeQuotaRetryDelayMs(baseDelay, retryCount, quotaRetryDelayHintMs = null) {
+    const exponentialDelay = baseDelay * Math.pow(2, retryCount);
+    const minimumDelay = Math.max(exponentialDelay, quotaRetryDelayHintMs || 0);
+    const jitter = minimumDelay * QUOTA_BACKOFF_JITTER_RATIO * Math.random();
+    return Math.max(0, Math.round(minimumDelay + jitter));
+}
 
 function createUnsupportedModelError(requestedModel, normalizedModel = requestedModel) {
     const requested = typeof requestedModel === 'string' && requestedModel.trim()
@@ -494,7 +629,7 @@ export class GeminiApiService {
     }
 
     async callApi(method, body, isRetry = false, retryCount = 0) {
-        const maxRetries = this.config.REQUEST_MAX_RETRIES || 3;
+        const maxRetries = this.config.REQUEST_MAX_RETRIES || DEFAULT_REQUEST_MAX_RETRIES;
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000; // 1 second base delay
 
         try {
@@ -551,8 +686,10 @@ export class GeminiApiService {
 
             // Handle 429 (Too Many Requests) with exponential backoff
             if (status === 429 && retryCount < maxRetries) {
-                const delay = baseDelay * Math.pow(2, retryCount);
-                logger.info(`[Gemini API] Received 429 (Too Many Requests). Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+                const quotaRetryDelayHintMs = getQuotaRetryDelayHintMs(error);
+                const delay = computeQuotaRetryDelayMs(baseDelay, retryCount, quotaRetryDelayHintMs);
+                const hintLog = quotaRetryDelayHintMs !== null ? ` (server hint >= ${Math.round(quotaRetryDelayHintMs)}ms)` : '';
+                logger.info(`[Gemini API] Received 429 (Too Many Requests). Retrying in ${delay}ms${hintLog}... (attempt ${retryCount + 1}/${maxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 return this.callApi(method, body, isRetry, retryCount + 1);
             }
@@ -579,7 +716,7 @@ export class GeminiApiService {
     }
 
     async * streamApi(method, body, isRetry = false, retryCount = 0) {
-        const maxRetries = this.config.REQUEST_MAX_RETRIES || 3;
+        const maxRetries = this.config.REQUEST_MAX_RETRIES || DEFAULT_REQUEST_MAX_RETRIES;
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000; // 1 second base delay
 
         try {
@@ -642,8 +779,10 @@ export class GeminiApiService {
 
             // Handle 429 (Too Many Requests) with exponential backoff
             if (status === 429 && retryCount < maxRetries) {
-                const delay = baseDelay * Math.pow(2, retryCount);
-                logger.info(`[Gemini API] Received 429 (Too Many Requests) during stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+                const quotaRetryDelayHintMs = getQuotaRetryDelayHintMs(error);
+                const delay = computeQuotaRetryDelayMs(baseDelay, retryCount, quotaRetryDelayHintMs);
+                const hintLog = quotaRetryDelayHintMs !== null ? ` (server hint >= ${Math.round(quotaRetryDelayHintMs)}ms)` : '';
+                logger.info(`[Gemini API] Received 429 (Too Many Requests) during stream. Retrying in ${delay}ms${hintLog}... (attempt ${retryCount + 1}/${maxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 yield* this.streamApi(method, body, isRetry, retryCount + 1);
                 return;
