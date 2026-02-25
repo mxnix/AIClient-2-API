@@ -48,6 +48,7 @@ const DEFAULT_USER_AGENT = 'antigravity/1.104.0 darwin/arm64';
 const REFRESH_SKEW = 3000; // 3000秒（50分钟）提前刷新Token
 const DEFAULT_REQUEST_MAX_RETRIES = 10;
 const QUOTA_BACKOFF_JITTER_RATIO = 0.2;
+const MAX_TRANSIENT_ERROR_RETRIES = 2;
 
 function parseDurationToMs(rawDuration) {
     if (rawDuration === undefined || rawDuration === null) {
@@ -1264,6 +1265,7 @@ export class AntigravityApiService {
 
     async callApi(method, body, isRetry = false, retryCount = 0, baseURLIndex = 0) {
         const maxRetries = this.config.REQUEST_MAX_RETRIES || DEFAULT_REQUEST_MAX_RETRIES;
+        const transientMaxRetries = Math.min(maxRetries, MAX_TRANSIENT_ERROR_RETRIES);
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000;
 
         if (baseURLIndex >= this.baseURLs.length) {
@@ -1335,20 +1337,25 @@ export class AntigravityApiService {
                     const errorIdentifier = errorCode || errorMessage.substring(0, 50);
                     logger.info(`[Antigravity API] Network error (${errorIdentifier}) on ${baseURL}. Trying next base URL...`);
                     return this.callApi(method, body, isRetry, retryCount, baseURLIndex + 1);
-                } else if (retryCount < maxRetries) {
+                } else if (retryCount < transientMaxRetries) {
                     const delay = baseDelay * Math.pow(2, retryCount);
                     const errorIdentifier = errorCode || errorMessage.substring(0, 50);
-                    logger.info(`[Antigravity API] Network error (${errorIdentifier}). Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+                    logger.info(`[Antigravity API] Network error (${errorIdentifier}). Retrying in ${delay}ms... (attempt ${retryCount + 1}/${transientMaxRetries})`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     return this.callApi(method, body, isRetry, retryCount + 1, 0);
                 }
             }
 
-            if (status >= 500 && status < 600 && retryCount < maxRetries) {
+            if (status >= 500 && status < 600 && retryCount < transientMaxRetries) {
                 const delay = baseDelay * Math.pow(2, retryCount);
-                logger.info(`[Antigravity API] Server error ${status}. Retrying in ${delay}ms...`);
+                logger.info(`[Antigravity API] Server error ${status}. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${transientMaxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 return this.callApi(method, body, isRetry, retryCount + 1, baseURLIndex);
+            }
+
+            if ((status >= 500 && status < 600) || isNetworkError) {
+                // Avoid a second retry wave at pool-switch layer for transient upstream failures.
+                error.skipCredentialSwitch = true;
             }
 
             throw error;
@@ -1357,6 +1364,7 @@ export class AntigravityApiService {
 
     async * streamApi(method, body, isRetry = false, retryCount = 0, baseURLIndex = 0) {
         const maxRetries = this.config.REQUEST_MAX_RETRIES || DEFAULT_REQUEST_MAX_RETRIES;
+        const transientMaxRetries = Math.min(maxRetries, MAX_TRANSIENT_ERROR_RETRIES);
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000;
 
         if (baseURLIndex >= this.baseURLs.length) {
@@ -1442,22 +1450,27 @@ export class AntigravityApiService {
                     logger.info(`[Antigravity API] Network error (${errorIdentifier}) on ${baseURL} during stream. Trying next base URL...`);
                     yield* this.streamApi(method, body, isRetry, retryCount, baseURLIndex + 1);
                     return;
-                } else if (retryCount < maxRetries) {
+                } else if (retryCount < transientMaxRetries) {
                     const delay = baseDelay * Math.pow(2, retryCount);
                     const errorIdentifier = errorCode || errorMessage.substring(0, 50);
-                    logger.info(`[Antigravity API] Network error (${errorIdentifier}) during stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+                    logger.info(`[Antigravity API] Network error (${errorIdentifier}) during stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${transientMaxRetries})`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     yield* this.streamApi(method, body, isRetry, retryCount + 1, 0);
                     return;
                 }
             }
 
-            if (status >= 500 && status < 600 && retryCount < maxRetries) {
+            if (status >= 500 && status < 600 && retryCount < transientMaxRetries) {
                 const delay = baseDelay * Math.pow(2, retryCount);
-                logger.info(`[Antigravity API] Server error ${status} during stream. Retrying in ${delay}ms...`);
+                logger.info(`[Antigravity API] Server error ${status} during stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${transientMaxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 yield* this.streamApi(method, body, isRetry, retryCount + 1, baseURLIndex);
                 return;
+            }
+
+            if ((status >= 500 && status < 600) || isNetworkError) {
+                // Avoid a second retry wave at pool-switch layer for transient upstream failures.
+                error.skipCredentialSwitch = true;
             }
 
             throw error;

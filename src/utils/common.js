@@ -485,6 +485,8 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         
         // 检查是否应该跳过错误计数（用于 429/5xx 等需要直接切换凭证的情况）
         const skipErrorCount = error.skipErrorCount === true;
+        // 检查是否应该跳过凭证切换（用于已在底层完成短重试的 5xx/网络错误）
+        const skipCredentialSwitch = error.skipCredentialSwitch === true;
         // 检查是否应该切换凭证（用于 429/5xx/402/403 等情况）
         const shouldSwitchCredential = error.shouldSwitchCredential === true;
         
@@ -492,7 +494,7 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         let credentialMarkedUnhealthy = error.credentialMarkedUnhealthy === true;
         
         // 如果底层未标记，且不跳过错误计数，则在此处标记
-        if (!credentialMarkedUnhealthy && !skipErrorCount && providerPoolManager && pooluuid) {
+        if (!credentialMarkedUnhealthy && !skipErrorCount && !skipCredentialSwitch && providerPoolManager && pooluuid) {
             // 400 报错码通常是请求参数问题，不记录为提供商错误
             if (error.response?.status === 400) {
                 logger.info(`[Provider Pool] Skipping unhealthy marking for ${toProvider} (${pooluuid}) due to status 400 (client error)`);
@@ -508,10 +510,12 @@ export async function handleStreamRequest(res, service, model, requestBody, from
             logger.info(`[Provider Pool] Credential ${pooluuid} already marked as unhealthy by lower layer, skipping duplicate marking`);
         } else if (skipErrorCount) {
             logger.info(`[Provider Pool] Skipping error count for ${toProvider} (${pooluuid}) - will switch credential without marking unhealthy`);
+        } else if (skipCredentialSwitch) {
+            logger.info(`[Provider Pool] Skipping credential switch for ${toProvider} (${pooluuid}) - handled by lower-layer transient retry`);
         }
         
         // 如果需要切换凭证（无论是否标记不健康），都设置标记以触发重试
-        if (shouldSwitchCredential && !credentialMarkedUnhealthy) {
+        if (shouldSwitchCredential && !credentialMarkedUnhealthy && !skipCredentialSwitch) {
             credentialMarkedUnhealthy = true; // 触发下面的重试逻辑
         }
         
@@ -683,6 +687,8 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         
         // 检查是否应该跳过错误计数（用于 429/5xx 等需要直接切换凭证的情况）
         const skipErrorCount = error.skipErrorCount === true;
+        // 检查是否应该跳过凭证切换（用于已在底层完成短重试的 5xx/网络错误）
+        const skipCredentialSwitch = error.skipCredentialSwitch === true;
         // 检查是否应该切换凭证（用于 429/5xx/402/403 等情况）
         const shouldSwitchCredential = error.shouldSwitchCredential === true;
         
@@ -690,7 +696,7 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         let credentialMarkedUnhealthy = error.credentialMarkedUnhealthy === true;
         
         // 如果底层未标记，且不跳过错误计数，则在此处标记
-        if (!credentialMarkedUnhealthy && !skipErrorCount && providerPoolManager && pooluuid) {
+        if (!credentialMarkedUnhealthy && !skipErrorCount && !skipCredentialSwitch && providerPoolManager && pooluuid) {
             // 400 报错码通常是请求参数问题，不记录为提供商错误
             if (error.response?.status === 400) {
                 logger.info(`[Provider Pool] Skipping unhealthy marking for ${toProvider} (${pooluuid}) due to status 400 (client error)`);
@@ -706,10 +712,12 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
             logger.info(`[Provider Pool] Credential ${pooluuid} already marked as unhealthy by lower layer, skipping duplicate marking`);
         } else if (skipErrorCount) {
             logger.info(`[Provider Pool] Skipping error count for ${toProvider} (${pooluuid}) - will switch credential without marking unhealthy`);
+        } else if (skipCredentialSwitch) {
+            logger.info(`[Provider Pool] Skipping credential switch for ${toProvider} (${pooluuid}) - handled by lower-layer transient retry`);
         }
         
         // 如果需要切换凭证（无论是否标记不健康），都设置标记以触发重试
-        if (shouldSwitchCredential && !credentialMarkedUnhealthy) {
+        if (shouldSwitchCredential && !credentialMarkedUnhealthy && !skipCredentialSwitch) {
             credentialMarkedUnhealthy = true; // 触发下面的重试逻辑
         }
         

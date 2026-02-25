@@ -39,6 +39,7 @@ const OAUTH_CLIENT_SECRET = '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';
 const GEMINI_MODELS = getProviderModels(MODEL_PROVIDER.GEMINI_CLI);
 const DEFAULT_REQUEST_MAX_RETRIES = 10;
 const QUOTA_BACKOFF_JITTER_RATIO = 0.2;
+const MAX_TRANSIENT_ERROR_RETRIES = 2;
 
 function parseDurationToMs(rawDuration) {
     if (rawDuration === undefined || rawDuration === null) {
@@ -630,6 +631,7 @@ export class GeminiApiService {
 
     async callApi(method, body, isRetry = false, retryCount = 0) {
         const maxRetries = this.config.REQUEST_MAX_RETRIES || DEFAULT_REQUEST_MAX_RETRIES;
+        const transientMaxRetries = Math.min(maxRetries, MAX_TRANSIENT_ERROR_RETRIES);
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000; // 1 second base delay
 
         try {
@@ -695,20 +697,25 @@ export class GeminiApiService {
             }
 
             // Handle other retryable errors (5xx server errors)
-            if (status >= 500 && status < 600 && retryCount < maxRetries) {
+            if (status >= 500 && status < 600 && retryCount < transientMaxRetries) {
                 const delay = baseDelay * Math.pow(2, retryCount);
-                logger.info(`[Gemini API] Received ${status} server error. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+                logger.info(`[Gemini API] Received ${status} server error. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${transientMaxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 return this.callApi(method, body, isRetry, retryCount + 1);
             }
 
             // Handle network errors (ECONNRESET, ETIMEDOUT, etc.) with exponential backoff
-            if (isNetworkError && retryCount < maxRetries) {
+            if (isNetworkError && retryCount < transientMaxRetries) {
                 const delay = baseDelay * Math.pow(2, retryCount);
                 const errorIdentifier = errorCode || errorMessage.substring(0, 50);
-                logger.info(`[Gemini API] Network error (${errorIdentifier}). Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+                logger.info(`[Gemini API] Network error (${errorIdentifier}). Retrying in ${delay}ms... (attempt ${retryCount + 1}/${transientMaxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 return this.callApi(method, body, isRetry, retryCount + 1);
+            }
+
+            if ((status >= 500 && status < 600) || isNetworkError) {
+                // Avoid a second retry wave at pool-switch layer for transient upstream failures.
+                error.skipCredentialSwitch = true;
             }
 
             throw error;
@@ -717,6 +724,7 @@ export class GeminiApiService {
 
     async * streamApi(method, body, isRetry = false, retryCount = 0) {
         const maxRetries = this.config.REQUEST_MAX_RETRIES || DEFAULT_REQUEST_MAX_RETRIES;
+        const transientMaxRetries = Math.min(maxRetries, MAX_TRANSIENT_ERROR_RETRIES);
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000; // 1 second base delay
 
         try {
@@ -789,22 +797,27 @@ export class GeminiApiService {
             }
 
             // Handle other retryable errors (5xx server errors)
-            if (status >= 500 && status < 600 && retryCount < maxRetries) {
+            if (status >= 500 && status < 600 && retryCount < transientMaxRetries) {
                 const delay = baseDelay * Math.pow(2, retryCount);
-                logger.info(`[Gemini API] Received ${status} server error during stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+                logger.info(`[Gemini API] Received ${status} server error during stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${transientMaxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 yield* this.streamApi(method, body, isRetry, retryCount + 1);
                 return;
             }
 
             // Handle network errors (ECONNRESET, ETIMEDOUT, etc.) with exponential backoff
-            if (isNetworkError && retryCount < maxRetries) {
+            if (isNetworkError && retryCount < transientMaxRetries) {
                 const delay = baseDelay * Math.pow(2, retryCount);
                 const errorIdentifier = errorCode || errorMessage.substring(0, 50);
-                logger.info(`[Gemini API] Network error (${errorIdentifier}) during stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+                logger.info(`[Gemini API] Network error (${errorIdentifier}) during stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${transientMaxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 yield* this.streamApi(method, body, isRetry, retryCount + 1);
                 return;
+            }
+
+            if ((status >= 500 && status < 600) || isNetworkError) {
+                // Avoid a second retry wave at pool-switch layer for transient upstream failures.
+                error.skipCredentialSwitch = true;
             }
 
             throw error;
