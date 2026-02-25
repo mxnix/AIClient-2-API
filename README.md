@@ -4,7 +4,7 @@
 
 # AIClient-2-API 🚀
 
-**A powerful proxy that can unify the requests of various client-only large model APIs (Gemini CLI, Antigravity, Qwen Code, Kiro ...), simulate requests, and encapsulate them into a local OpenAI-compatible interface.**
+**Мощный прокси, который умеет объединять запросы к разным API больших моделей, доступным только через клиент (Gemini CLI, Antigravity, Qwen Code, Kiro ...), эмулировать запросы и упаковывать их в локальный OpenAI-совместимый интерфейс.**
 
 </div>
 
@@ -18,111 +18,125 @@
 [![GitHub stars](https://img.shields.io/github/stars/mxnix/AIClient-2-API.svg?style=flat&label=Star)](https://github.com/mxnix/AIClient-2-API/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/mxnix/AIClient-2-API.svg)](https://github.com/mxnix/AIClient-2-API/issues)
 
-[**🔧 OpenClaw Config**](./docs/OPENCLAW_CONFIG_GUIDE.md) | [中文](./README-ZH.md) | [**👉 English**](./README.md) | [日本語](./README-JA.md) | [Русский](./README-RU.md) | [**📚 Documentation**](https://aiproxy.justlikemaki.vip/en/)
+[**🔧 Конфиг OpenClaw**](./docs/OPENCLAW_CONFIG_GUIDE.md) | [中文](./README-ZH.md) | [English](./README.md) | [日本語](./README-JA.md) | [**👉 Русский**](./README-RU.md) | [**📚 Documentation**](https://aiproxy.justlikemaki.vip/en/)
 
 </div>
 
-`AIClient2API` is an API proxy service that breaks through client limitations, converting free large models originally restricted to client use only (such as Gemini, Antigravity, Qwen Code, Kiro) into standard OpenAI-compatible interfaces that can be called by any application. Built on Node.js, it supports intelligent conversion between OpenAI, Claude, and Gemini protocols, enabling tools like Cherry-Studio, NextChat, and Cline to freely use advanced models such as Claude Opus 4.5, Gemini 3.0 Pro, and Qwen3 Coder Plus at scale. The project adopts a modular architecture based on strategy and adapter patterns, with built-in account pool management, intelligent polling, automatic failover, and health check mechanisms, ensuring 99.9% service availability.
+`AIClient2API` - это API-прокси сервис, снимающий ограничения клиентских приложений: он превращает бесплатные большие модели, изначально доступные только через клиент (например, Gemini, Antigravity, Qwen Code, Kiro), в стандартные OpenAI-совместимые интерфейсы, которые можно вызывать из любых приложений. Проект построен на Node.js, поддерживает интеллектуальное преобразование протоколов OpenAI, Claude и Gemini и позволяет инструментам вроде Cherry-Studio, NextChat и Cline масштабно использовать продвинутые модели вроде Claude Opus 4.5, Gemini 3.0 Pro и Qwen3 Coder Plus. В проекте используется модульная архитектура на основе паттернов Strategy и Adapter, а также встроены управление пулом аккаунтов, интеллектуальный опрос, автоматическое переключение при сбоях и проверки здоровья, что обеспечивает доступность сервиса на уровне 99.9%.
 
 > [!NOTE]
-> **🎉 Important Milestone**
+> **🎉 Важная веха**
 >
-> - Thanks to Ruan Yifeng for the recommendation in [Weekly Issue 359](https://www.ruanyifeng.com/blog/2025/08/weekly-issue-359.html)
+> - Спасибо Ruan Yifeng за рекомендацию в [Weekly Issue 359](https://www.ruanyifeng.com/blog/2025/08/weekly-issue-359.html)
 >
-> **📅 Version Update Log**
+> **📅 Журнал обновлений**
 >
 > <details>
-> <summary>Click to expand detailed version history</summary>
+> <summary>Нажмите, чтобы развернуть подробную историю версий</summary>
 >
-> - **2026.01.26** - Added Codex protocol support: supports OpenAI Codex OAuth authorization access
-> - **2026.01.25** - Enhanced AI Monitor plugin: supports monitoring request parameters and responses before and after AI protocol conversion. Optimized log management: unified log format, visual configuration
-> - **2026.01.15** - Optimized provider pool manager: added async refresh queue mechanism, buffer queue deduplication, global concurrency control, node warmup and automatic expiry detection
-> - **2026.01.07** - Added iFlow protocol support, enabling access to Qwen, Kimi, DeepSeek, and GLM series models via OAuth authentication with automatic token refresh
-> - **2026.01.03** - Added theme switching functionality and optimized provider pool initialization, removed the fallback strategy of using provider default configuration
-> - **2025.12.30** - Added main process management and automatic update functionality
-> - **2025.12.25** - Unified configuration management: All configs centralized to `configs/` directory. Docker users need to update mount path to `-v "local_path:/app/configs"`
-> - **2025.12.11** - Automatically built Docker images are now available on Docker Hub: [nikzmx/aiclient-2-api](https://hub.docker.com/r/nikzmx/aiclient-2-api)
-> - **2025.11.30** - Added Antigravity protocol support, enabling access to Gemini 3 Pro, Claude Sonnet 4.5, and other models via Google internal interfaces
-> - **2025.11.16** - Added Ollama protocol support, unified interface to access all supported models (Claude, Gemini, Qwen, OpenAI, etc.)
-> - **2025.11.11** - Added Web UI management console, supporting real-time configuration management and health status monitoring
-> - **2025.11.06** - Added support for Gemini 3 Preview, enhanced model compatibility and performance optimization
-> - **2025.10.18** - Kiro open registration, new accounts get 500 credits, full support for Claude Sonnet 4.5
-> - **2025.09.01** - Integrated Qwen Code CLI, added `qwen3-coder-plus` model support
-> - **2025.08.29** - Released account pool management feature, supporting multi-account polling, intelligent failover, and automatic degradation strategies
->   - Configuration: Add `PROVIDER_POOLS_FILE_PATH` parameter in `configs/config.json`
->   - Reference configuration: [provider_pools.json](./configs/provider_pools.json.example)
-> - **History Developed**
->   - Support Gemini CLI, Kiro and other client2API
->   - OpenAI, Claude, Gemini three-protocol mutual conversion, automatic intelligent switching
+> - **2026.01.26** - Добавлена поддержка протокола Codex: поддержан вход через OAuth OpenAI Codex
+> - **2026.01.25** - Улучшен плагин AI Monitor: поддержан мониторинг параметров запросов и ответов до и после преобразования AI-протокола. Оптимизировано управление логами: единый формат логов, визуальная настройка
+> - **2026.01.15** - Оптимизирован менеджер пулов провайдеров: добавлены асинхронная очередь обновления, дедупликация буферной очереди, глобальный контроль параллелизма, прогрев нод и автообнаружение истечения срока
+> - **2026.01.07** - Добавлена поддержка протокола iFlow: доступ к моделям Qwen, Kimi, DeepSeek и серии GLM через OAuth с автоматическим обновлением token
+> - **2026.01.03** - Добавлено переключение тем и оптимизирована инициализация пула провайдеров, удалена стратегия fallback на дефолтную конфигурацию провайдера
+> - **2025.12.30** - Добавлены управление главным процессом и функция автообновления
+> - **2025.12.25** - Унифицировано управление конфигами: все конфиги централизованы в директории `configs/`. Пользователям Docker нужно обновить путь монтирования на `-v "local_path:/app/configs"`
+> - **2025.12.11** - Автоматически собранные Docker-образы доступны на Docker Hub: [nikzmx/aiclient-2-api](https://hub.docker.com/r/nikzmx/aiclient-2-api)
+> - **2025.11.30** - Добавлена поддержка протокола Antigravity: доступ к Gemini 3 Pro, Claude Sonnet 4.5 и другим моделям через внутренние интерфейсы Google
+> - **2025.11.16** - Добавлена поддержка протокола Ollama: единый интерфейс доступа ко всем поддерживаемым моделям (Claude, Gemini, Qwen, OpenAI и т.д.)
+> - **2025.11.11** - Добавлена Web UI консоль управления с поддержкой управления конфигурацией в реальном времени и мониторинга состояния
+> - **2025.11.06** - Добавлена поддержка Gemini 3 Preview, усилены совместимость моделей и оптимизация производительности
+> - **2025.10.18** - Открыта регистрация Kiro, новые аккаунты получают 500 кредитов, полностью поддержан Claude Sonnet 4.5
+> - **2025.09.01** - Интегрирован Qwen Code CLI, добавлена поддержка модели `qwen3-coder-plus`
+> - **2025.08.29** - Выпущена функция управления пулом аккаунтов с поддержкой мультиаккаунтного опроса, интеллектуального failover и автоматической деградации
+>   - Конфигурация: добавьте параметр `PROVIDER_POOLS_FILE_PATH` в `configs/config.json`
+>   - Пример конфигурации: [provider_pools.json](./configs/provider_pools.json.example)
+> - **Исторически реализовано**
+>   - Поддержка Gemini CLI, Kiro и других client2API
+>   - Взаимная конвертация трёх протоколов OpenAI, Claude, Gemini с автоматическим интеллектуальным переключением
 > </details>
 
 ---
 
-## 💡 Core Advantages
+## 💡 Ключевые преимущества
 
-### 🎯 Unified Access, One-Stop Management
-*   **Multi-Model Unified Interface**: Through standard OpenAI-compatible protocol, configure once to access mainstream large models including Gemini, Claude, Qwen Code, Kimi K2, MiniMax M2
-*   **Flexible Switching Mechanism**: Path routing, support dynamic model switching via startup parameters or environment variables to meet different scenario requirements
-*   **Zero-Cost Migration**: Fully compatible with OpenAI API specifications, tools like Cherry-Studio, NextChat, Cline can be used without modification
-*   **Multi-Protocol Intelligent Conversion**: Support intelligent conversion between OpenAI, Claude, and Gemini protocols for cross-protocol model invocation
+### 🎯 Единый доступ и централизованное управление
+*   **Единый интерфейс для множества моделей**: через стандартный OpenAI-совместимый протокол достаточно одной настройки для доступа к основным LLM, включая Gemini, Claude, Qwen Code, Kimi K2, MiniMax M2
+*   **Гибкий механизм переключения**: маршрутизация по path, динамическое переключение моделей через параметры запуска или переменные окружения под разные сценарии
+*   **Миграция без затрат**: полная совместимость со спецификацией OpenAI API, инструменты вроде Cherry-Studio, NextChat, Cline работают без модификаций
+*   **Интеллектуальное преобразование протоколов**: поддержка преобразования между OpenAI, Claude и Gemini для вызовов моделей между протоколами
 
-### 🚀 Break Through Limitations, Improve Efficiency
-*   **Bypass Official Restrictions**: Utilize OAuth authorization mechanism to effectively break through rate and quota limits of services like Gemini, Antigravity
-*   **Free Advanced Models**: Use Claude Opus 4.5 for free via Kiro API mode, use Qwen3 Coder Plus via Qwen OAuth mode, reducing usage costs
-*   **Intelligent Account Pool Scheduling**: Support multi-account polling, automatic failover, and configuration degradation, ensuring 99.9% service availability
+### 🚀 Снятие ограничений и рост эффективности
+*   **Обход официальных ограничений**: OAuth-механизм помогает эффективно обходить ограничения по rate и quota у Gemini, Antigravity и других сервисов
+*   **Бесплатный доступ к продвинутым моделям**: используйте Claude Opus 4.5 бесплатно через режим Kiro API, а Qwen3 Coder Plus через режим Qwen OAuth, снижая стоимость использования
+*   **Интеллектуальное планирование пула аккаунтов**: мультиаккаунтный опрос, автоматический failover и деградация конфигурации обеспечивают 99.9% доступности
 
-### 🛡️ Secure and Controllable, Data Transparent
-*   **Full-Chain Log Recording**: Capture all request and response data, supporting auditing and debugging
-*   **Private Dataset Construction**: Quickly build proprietary training datasets based on log data
-*   **System Prompt Management**: Support override and append modes, achieving perfect combination of unified base instructions and personalized extensions
+### 🛡️ Безопасность, контроль и прозрачность данных
+*   **Сквозное логирование**: захват всех запросов и ответов для аудита и отладки
+*   **Построение приватных датасетов**: быстрое формирование собственных обучающих наборов данных на основе логов
+*   **Управление системным prompt**: режимы override и append для сочетания единой базовой инструкции и персональных расширений
 
-### 🔧 Developer-Friendly, Easy to Extend
-*   **Web UI Management Console**: Real-time configuration management, health status monitoring, API testing and log viewing
-*   **Modular Architecture**: Based on strategy and adapter patterns, adding new model providers requires only 3 steps
-*   **Complete Test Coverage**: Integration and unit test coverage 90%+, ensuring code quality
-*   **Containerized Deployment**: Provides Docker support, one-click deployment, cross-platform operation
+### 🔧 Удобство для разработчиков и расширяемость
+*   **Web UI консоль управления**: конфигурация в реальном времени, мониторинг состояния, API-тестирование и просмотр логов
+*   **Модульная архитектура**: на базе паттернов Strategy и Adapter, добавление нового провайдера модели занимает всего 3 шага
+*   **Полное покрытие тестами**: покрытие интеграционными и unit-тестами 90%+, что повышает качество кода
+*   **Контейнерное развертывание**: поддержка Docker, запуск в один клик, кроссплатформенная работа
 
 ---
 
-## 📑 Quick Navigation
+## 📑 Быстрая навигация
 
-- [💡 Core Advantages](#-core-advantages)
-- [🚀 Quick Start](#-quick-start)
-  - [🐳 Docker Deployment](https://hub.docker.com/r/nikzmx/aiclient-2-api)
-  - [📋 Core Features](#-core-features)
-- [🔐 Authorization Configuration Guide](#-authorization-configuration-guide)
-- [📁 Authorization File Storage Paths](#-authorization-file-storage-paths)
-- [🦙 Ollama Protocol Usage Examples](#-ollama-protocol-usage-examples)
-- [⚙️ Advanced Configuration](#advanced-configuration)
+- [💡 Ключевые преимущества](#-ключевые-преимущества)
+- [🚀 Быстрый старт](#-быстрый-старт)
+  - [🐳 Docker развертывание](https://hub.docker.com/r/nikzmx/aiclient-2-api)
+  - [📋 Основные возможности](#-основные-возможности)
+- [🔐 Руководство по настройке авторизации](#-руководство-по-настройке-авторизации)
+- [📁 Пути хранения файлов авторизации](#-пути-хранения-файлов-авторизации)
+- [🦙 Примеры использования протокола Ollama](#-примеры-использования-протокола-ollama)
+- [⚙️ Продвинутая конфигурация](#продвинутая-конфигурация)
 - [❓ FAQ](#-faq)
-- [📄 Open Source License](#-open-source-license)
-- [🙏 Acknowledgements](#-acknowledgements)
-- [⚠️ Disclaimer](#️-disclaimer)
+- [📄 Лицензия open source](#-лицензия-open-source)
+- [🙏 Благодарности](#-благодарности)
+- [⚠️ Отказ от ответственности](#️-отказ-от-ответственности)
 
 ---
 
-## 🔧 Usage Instructions
+## 🔧 Инструкции по использованию
 
-### 🚀 Quick Start
+### 🚀 Быстрый старт
 
-The most recommended way to use AIClient-2-API is to start it through an automated script and configure it visually directly in the **Web UI console**.
+Самый рекомендуемый способ использования AIClient-2-API - запуск через автоматизированный скрипт и визуальная настройка напрямую в **Web UI консоли**.
 
-#### 🐳 Docker Quick Start (Recommended)
+#### 🐳 Быстрый запуск Docker (рекомендуется)
 
 ```bash
 docker run -d -p 3000:3000 -p 8085-8087:8085-8087 -p 1455:1455 -p 19876-19880:19876-19880 --restart=always -v "your_path:/app/configs" --name aiclient2api nikzmx/aiclient-2-api
 ```
 
-**Parameter Description**:
-- `-d`: Run container in background
-- `-p 3000:3000 ...`: Port mapping. 3000 is for Web UI, others are for OAuth callbacks (Gemini: 8085, Antigravity: 8086, iFlow: 8087, Codex: 1455, Kiro: 19876-19880)
-- `--restart=always`: Container auto-restart policy
-- `-v "your_path:/app/configs"`: Mount configuration directory (replace "your_path" with actual path, e.g., `/home/user/aiclient-configs`)
-- `--name aiclient2api`: Container name
+**Описание параметров**:
+- `-d`: запуск контейнера в фоне
+- `-p 3000:3000 ...`: проброс портов. 3000 - для Web UI, остальные - для OAuth callback (Gemini: 8085, Antigravity: 8086, iFlow: 8087, Codex: 1455, Kiro: 19876-19880)
+- `--restart=always`: политика автоперезапуска контейнера
+- `-v "your_path:/app/configs"`: монтирование директории конфигов (замените "your_path" на реальный путь, например `/home/user/aiclient-configs`)
+- `--name aiclient2api`: имя контейнера
 
-#### 🐳 Docker Compose Deployment
+#### 🔧 Запуск с Node.JS
 
-You can also use Docker Compose for deployment. First, navigate to the `docker` directory:
+Для запуска, установите:
+
+- **Node.JS**
+- **Git**
+
+```bash
+git clone https://github.com/mxnix/AIClient-2-API.git
+cd AIClient-2-API
+npm install
+npm start
+```
+
+#### 🐳 Развертывание через Docker Compose
+
+Вы также можете использовать Docker Compose. Сначала перейдите в директорию `docker`:
 
 ```bash
 cd docker
@@ -130,28 +144,28 @@ mkdir -p configs
 docker compose up -d
 ```
 
-To build from source instead of using the pre-built image, edit `docker-compose.yml`:
-1. Comment out the `image: nikzmx/aiclient-2-api:latest` line
-2. Uncomment the `build:` section
-3. Run `docker compose up -d --build`
+Чтобы собирать из исходников вместо готового образа, отредактируйте `docker-compose.yml`:
+1. Закомментируйте строку `image: nikzmx/aiclient-2-api:latest`
+2. Раскомментируйте секцию `build:`
+3. Выполните `docker compose up -d --build`
 
-#### 1. Run the startup script
+#### 1. Запустите стартовый скрипт
 *   **Linux/macOS**: `chmod +x install-and-run.sh && ./install-and-run.sh`
-*   **Windows**: Double-click `install-and-run.bat`
+*   **Windows**: двойной клик по `install-and-run.bat`
 
-#### 2. Access the console
-After the server starts, open your browser and visit:
+#### 2. Откройте консоль
+После запуска сервера откройте браузер и перейдите:
 👉 [**http://localhost:3000**](http://localhost:3000)
 
-> **Default Password**: `admin123` (can be changed in the console or by modifying the `pwd` file after login)
+> **Пароль по умолчанию**: `admin123` (можно изменить в консоли или через файл `pwd` после входа)
 
-#### 3. Visual Configuration (Recommended)
-Go to the **"Configuration"** page, you can:
-*   ✅ Fill in the API Key for each provider or upload OAuth credential files
-*   ✅ Switch default model providers in real-time
-*   ✅ Monitor health status and real-time request logs
+#### 3. Визуальная настройка (рекомендуется)
+Перейдите на страницу **"Configuration"**, где можно:
+*   ✅ Заполнить API Key для каждого провайдера или загрузить OAuth-файлы учетных данных
+*   ✅ Переключать провайдера модели по умолчанию в реальном времени
+*   ✅ Мониторить состояние здоровья и логи запросов в реальном времени
 
-#### Script Execution Example
+#### Пример выполнения скрипта
 ```
 ========================================
   AI Client 2 API Quick Install Script
@@ -172,71 +186,71 @@ Go to the **"Configuration"** page, you can:
 ⏹️  Press Ctrl+C to stop server
 ```
 
-> **💡 Tip**: The script will automatically install dependencies and start the server. If you encounter any issues, the script provides clear error messages and suggested solutions.
+> **💡 Подсказка**: скрипт автоматически установит зависимости и запустит сервер. При ошибках скрипт покажет понятные сообщения и предложит варианты решения.
 
 ---
 
-### 📋 Core Features
+### 📋 Основные возможности
 
-#### Web UI Management Console
+#### Web UI консоль управления
 
 ![Web UI](src/img/en.png)
 
-A functional Web management interface, including:
+Функциональный Web-интерфейс управления, включая:
 
-**📊 Dashboard**: System overview, interactive routing examples, client configuration guide
+**📊 Dashboard**: обзор системы, интерактивные примеры маршрутизации, гайд по настройке клиента
 
-**⚙️ Configuration**: Real-time parameter modification, supporting all providers (Gemini, Antigravity, OpenAI, Claude, Kiro, Qwen), including advanced settings and file uploads
+**⚙️ Configuration**: изменение параметров в реальном времени, поддержка всех провайдеров (Gemini, Antigravity, OpenAI, Claude, Kiro, Qwen), включая продвинутые настройки и загрузку файлов
 
-**🔗 Provider Pools**: Monitor active connections, provider health statistics, enable/disable management
+**🔗 Provider Pools**: мониторинг активных подключений, статистика здоровья провайдеров, управление включением/отключением
 
-**📁 Config Files**: Centralized OAuth credential management, supporting search filtering and file operations
+**📁 Config Files**: централизованное управление OAuth-учетными данными, поддержка поиска, фильтрации и операций с файлами
 
-**📜 Real-time Logs**: Real-time display of system and request logs, with management controls
+**📜 Real-time Logs**: отображение системных логов и логов запросов в реальном времени с элементами управления
 
-**🔐 Login Verification**: Default password `admin123`, can be modified via `pwd` file
+**🔐 Login Verification**: пароль по умолчанию `admin123`, можно изменить через файл `pwd`
 
-Access: `http://localhost:3000` → Login → Sidebar navigation → Take effect immediately
+Доступ: `http://localhost:3000` → Login → навигация в боковой панели → изменения применяются сразу
 
-#### Multimodal Input Capabilities
-Supports various input types such as images and documents, providing you with a richer interaction experience and more powerful application scenarios.
+#### Поддержка мультимодального ввода
+Поддерживаются разные типы входных данных, включая изображения и документы, что дает более богатый сценарий взаимодействия и применения.
 
-#### Latest Model Support
-Seamlessly support the following latest large models, just configure the corresponding endpoint in Web UI or [`configs/config.json`](./configs/config.json):
-*   **Claude 4.5 Opus** - Anthropic's strongest model ever, now supported via Kiro, Antigravity
-*   **Gemini 3 Pro** - Google's next-generation architecture preview, now supported via Gemini, Antigravity
-*   **Qwen3 Coder Plus** - Alibaba Tongyi Qianwen's latest code-specific model, now supported via Qwen Code
-*   **Kimi K2 / MiniMax M2** - Synchronized support for top domestic flagship models, now supported via custom OpenAI, Claude
+#### Поддержка новейших моделей
+Бесшовно поддерживаются следующие актуальные большие модели, достаточно настроить соответствующий endpoint в Web UI или в [`configs/config.json`](./configs/config.json):
+*   **Claude 4.5 Opus** - самая мощная модель Anthropic на текущий момент, поддерживается через Kiro, Antigravity
+*   **Gemini 3 Pro** - превью архитектуры нового поколения от Google, поддерживается через Gemini, Antigravity
+*   **Qwen3 Coder Plus** - свежая кодовая модель Tongyi Qianwen от Alibaba, поддерживается через Qwen Code
+*   **Kimi K2 / MiniMax M2** - синхронная поддержка флагманских локальных моделей, поддерживаются через кастомные OpenAI, Claude
 
 ---
 
-### 🔐 Authorization Configuration Guide
+### 🔐 Руководство по настройке авторизации
 
 <details>
-<summary>Click to expand detailed authorization configuration steps for each provider</summary>
+<summary>Нажмите, чтобы раскрыть подробные шаги авторизации для каждого провайдера</summary>
 
-> **💡 Tip**: For the best experience, it is recommended to manage authorization visually through the **Web UI console**.
+> **💡 Подсказка**: для лучшего опыта рекомендуется управлять авторизацией визуально через **Web UI консоль**.
 
-#### 🌐 Web UI Quick Authorization (Recommended)
-In the Web UI management interface, you can complete authorization configuration rapidly:
-1. **Generate Authorization**: On the **"Provider Pools"** page or **"Configuration"** page, click the **"Generate Authorization"** button in the upper right corner of the corresponding provider (e.g., Gemini, Qwen).
-2. **Scan/Login**: An authorization dialog will pop up, you can click **"Open in Browser"** for login verification. For Qwen, just complete the web login; for Gemini and Antigravity, complete the Google account authorization.
-3. **Auto-Save**: After successful authorization, the system will automatically obtain credentials and save them to the corresponding directory in `configs/`. You can see the newly generated credentials on the **"Config Files"** page.
-4. **Visual Management**: You can upload or delete credentials at any time in the Web UI, or use the **"Quick Associate"** function to bind existing credential files to providers with one click.
+#### 🌐 Быстрая авторизация в Web UI (рекомендуется)
+В интерфейсе управления Web UI авторизацию можно выполнить быстро:
+1. **Сгенерируйте авторизацию**: на странице **"Provider Pools"** или **"Configuration"** нажмите кнопку **"Generate Authorization"** в правом верхнем углу соответствующего провайдера (например, Gemini, Qwen).
+2. **Сканирование/вход**: откроется диалог авторизации, где можно нажать **"Open in Browser"** для прохождения логина. Для Qwen достаточно завершить веб-логин; для Gemini и Antigravity требуется авторизация аккаунта Google.
+3. **Автосохранение**: после успешной авторизации система автоматически получит учетные данные и сохранит их в соответствующую директорию `configs/`. Новые учетные данные появятся на странице **"Config Files"**.
+4. **Визуальное управление**: в Web UI можно в любой момент загружать или удалять учетные данные, а также использовать **"Quick Associate"** для привязки существующих файлов к провайдерам в один клик.
 
-#### Gemini CLI OAuth Configuration
-1. **Obtain OAuth Credentials**: Visit [Google Cloud Console](https://console.cloud.google.com/) to create a project and enable Gemini API
-2. **Project Configuration**: You may need to provide a valid Google Cloud project ID, which can be specified via the startup parameter `--project-id`
-3. **Ensure Project ID**: When configuring in the Web UI, ensure the project ID entered matches the project ID displayed in the Google Cloud Console and Gemini CLI.
+#### Конфигурация Gemini CLI OAuth
+1. **Получение OAuth-учетных данных**: перейдите в [Google Cloud Console](https://console.cloud.google.com/) и создайте проект, затем включите Gemini API
+2. **Конфигурация проекта**: может потребоваться валидный Google Cloud project ID, его можно задать через параметр запуска `--project-id`
+3. **Проверка Project ID**: при настройке в Web UI убедитесь, что введенный project ID совпадает с ID, отображаемым в Google Cloud Console и Gemini CLI.
 
-#### Antigravity OAuth Configuration
-1. **Personal Account**: Personal accounts require separate authorization, application channels have been closed.
-2. **Pro Member**: Antigravity is temporarily open to Pro members, you need to purchase a Pro membership first.
-3. **Organization Account**: Organization accounts require separate authorization, contact the administrator to obtain authorization.
+#### Конфигурация Antigravity OAuth
+1. **Персональный аккаунт**: для персональных аккаунтов нужна отдельная авторизация, каналы заявок закрыты.
+2. **Pro-подписка**: Antigravity временно открыт для пользователей Pro, сначала нужно оформить подписку Pro.
+3. **Организационный аккаунт**: для организационных аккаунтов требуется отдельная авторизация, обратитесь к администратору.
 
-#### Qwen Code OAuth Configuration
-1. **First Authorization**: After configuring the Qwen service, the system will automatically open the authorization page in the browser
-2. **Recommended Parameters**: Use official default parameters for best results
+#### Конфигурация Qwen Code OAuth
+1. **Первая авторизация**: после настройки сервиса Qwen система автоматически откроет страницу авторизации в браузере
+2. **Рекомендуемые параметры**: используйте официальные параметры по умолчанию для лучшего результата
    ```json
    {
      "temperature": 0,
@@ -244,16 +258,16 @@ In the Web UI management interface, you can complete authorization configuration
    }
    ```
 
-#### Kiro API Configuration
-1. **Environment Preparation**: [Download and install Kiro client](https://kiro.dev/pricing/)
-2. **Complete Authorization**: Log in to your account in the client to generate `kiro-auth-token.json` credential file
-3. **Best Practice**: Recommended to use with **Claude Code** for optimal experience
-4. **Important Notice**: Kiro service usage policy has been updated, please visit the official website for the latest usage restrictions and terms
+#### Конфигурация Kiro API
+1. **Подготовка окружения**: [скачайте и установите клиент Kiro](https://kiro.dev/pricing/)
+2. **Завершите авторизацию**: войдите в аккаунт в клиенте, чтобы сгенерировать файл учетных данных `kiro-auth-token.json`
+3. **Лучшая практика**: рекомендуется использовать вместе с **Claude Code**
+4. **Важно**: политика использования Kiro обновлена, смотрите актуальные ограничения и условия на официальном сайте
 
-#### Kiro Extended Thinking (Claude Models)
-AIClient-2-API supports Kiro extended thinking when using Claude-compatible requests (`/v1/messages`) or OpenAI-compatible requests (`/v1/chat/completions`) routed to `claude-kiro-oauth`.
+#### Расширенное мышление Kiro (модели Claude)
+AIClient-2-API поддерживает режим extended thinking Kiro при использовании Claude-совместимых запросов (`/v1/messages`) или OpenAI-совместимых запросов (`/v1/chat/completions`), маршрутизированных на `claude-kiro-oauth`.
 
-**Claude-compatible (`/v1/messages`)**:
+**Claude-совместимый (`/v1/messages`)**:
 ```bash
 curl http://localhost:3000/claude-kiro-oauth/v1/messages \
   -H "Content-Type: application/json" \
@@ -266,7 +280,7 @@ curl http://localhost:3000/claude-kiro-oauth/v1/messages \
   }'
 ```
 
-**OpenAI-compatible (`/v1/chat/completions`)**:
+**OpenAI-совместимый (`/v1/chat/completions`)**:
 ```bash
 curl http://localhost:3000/claude-kiro-oauth/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -282,72 +296,72 @@ curl http://localhost:3000/claude-kiro-oauth/v1/chat/completions \
   }'
 ```
 
-**Adaptive mode**:
+**Адаптивный режим**:
 - Claude: `"thinking": { "type": "adaptive", "effort": "high" }`
 - OpenAI: `"extra_body.anthropic.thinking": { "type": "adaptive", "effort": "high" }`
 
-Notes:
-- `budget_tokens` is clamped to `[1024, 24576]` (default `20000` if omitted/invalid).
-- Token acquisition/refresh/pool rotation is unchanged.
+Примечания:
+- `budget_tokens` ограничивается диапазоном `[1024, 24576]` (по умолчанию `20000`, если поле пропущено или невалидно).
+- Получение token, обновление token и ротация пула остаются без изменений.
 
-#### iFlow OAuth Configuration
-1. **First Authorization**: In Web UI's "Configuration" or "Provider Pools" page, click the "Generate Authorization" button for iFlow
-2. **Phone Login**: The system will open the iFlow authorization page, complete login verification using your phone number
-3. **Auto Save**: After successful authorization, the system will automatically obtain the API Key and save credentials
-4. **Supported Models**: Qwen3 series, Kimi K2, DeepSeek V3/R1, GLM-4.6/4.7, etc.
-5. **Auto Refresh**: The system will automatically refresh tokens when they are about to expire, no manual intervention required
+#### Конфигурация iFlow OAuth
+1. **Первая авторизация**: в Web UI на странице "Configuration" или "Provider Pools" нажмите кнопку "Generate Authorization" для iFlow
+2. **Вход по номеру телефона**: система откроет страницу авторизации iFlow, завершите вход с подтверждением по номеру телефона
+3. **Автосохранение**: после успешной авторизации система автоматически получит API Key и сохранит учетные данные
+4. **Поддерживаемые модели**: серии Qwen3, Kimi K2, DeepSeek V3/R1, GLM-4.6/4.7 и др.
+5. **Автообновление**: система автоматически обновляет token перед истечением срока, без ручного вмешательства
 
-#### Codex OAuth Configuration
-1. **Generate Authorization**: On the Web UI "Provider Pools" or "Configuration" page, click the "Generate Authorization" button for Codex
-2. **Browser Login**: The system opens the OpenAI Codex authorization page to complete OAuth login
-3. **Auto Save**: After successful authorization, the system automatically saves the Codex OAuth credential file
-4. **Callback Port**: Ensure the OAuth callback port `1455` is not occupied
+#### Конфигурация Codex OAuth
+1. **Сгенерируйте авторизацию**: в Web UI на странице "Provider Pools" или "Configuration" нажмите кнопку "Generate Authorization" для Codex
+2. **Вход в браузере**: система откроет страницу авторизации OpenAI Codex для OAuth-входа
+3. **Автосохранение**: после успешной авторизации система автоматически сохранит файл учетных данных Codex OAuth
+4. **Порт callback**: убедитесь, что OAuth callback порт `1455` не занят
 
-#### Account Pool Management Configuration
-1. **Create Pool Configuration File**: Create a configuration file referencing [provider_pools.json.example](./configs/provider_pools.json.example)
-2. **Configure Pool Parameters**: Set `PROVIDER_POOLS_FILE_PATH` in `configs/config.json` to point to the pool configuration file
-3. **Startup Parameter Configuration**: Use the `--provider-pools-file <path>` parameter to specify the pool configuration file path
-4. **Health Check**: The system will automatically perform periodic health checks and avoid using unhealthy providers
+#### Настройка управления пулом аккаунтов
+1. **Создайте файл конфигурации пула**: ориентируйтесь на [provider_pools.json.example](./configs/provider_pools.json.example)
+2. **Настройте параметры пула**: укажите `PROVIDER_POOLS_FILE_PATH` в `configs/config.json`, чтобы он указывал на файл конфигурации пула
+3. **Параметр запуска**: используйте параметр `--provider-pools-file <path>` для указания пути к конфигу пула
+4. **Проверка здоровья**: система автоматически выполняет периодические health check и исключает нездоровых провайдеров
 
 </details>
 
-### 📁 Authorization File Storage Paths
+### 📁 Пути хранения файлов авторизации
 
 <details>
-<summary>Click to expand default storage locations for authorization credentials</summary>
+<summary>Нажмите, чтобы раскрыть стандартные пути хранения учетных данных авторизации</summary>
 
-Default storage locations for authorization credential files of each service:
+Стандартные пути хранения файлов учетных данных авторизации для каждого сервиса:
 
-| Service | Default Path | Description |
-|------|---------|------|
-| **Gemini** | `~/.gemini/oauth_creds.json` | OAuth authentication credentials |
-| **Kiro** | `~/.aws/sso/cache/kiro-auth-token.json` | Kiro authentication token |
-| **Qwen** | `~/.qwen/oauth_creds.json` | Qwen OAuth credentials |
-| **Antigravity** | `~/.antigravity/oauth_creds.json` | Antigravity OAuth credentials (supports Claude 4.5 Opus) |
-| **iFlow** | `~/.iflow/oauth_creds.json` | iFlow OAuth credentials (supports Qwen, Kimi, DeepSeek, GLM) |
-| **Codex** | `~/.codex/oauth_creds.json` | Codex OAuth credentials |
+| Сервис          | Путь по умолчанию                       | Описание                                                         |
+| --------------- | --------------------------------------- | ---------------------------------------------------------------- |
+| **Gemini**      | `~/.gemini/oauth_creds.json`            | OAuth-учетные данные                                             |
+| **Kiro**        | `~/.aws/sso/cache/kiro-auth-token.json` | Токен аутентификации Kiro                                        |
+| **Qwen**        | `~/.qwen/oauth_creds.json`              | OAuth-учетные данные Qwen                                        |
+| **Antigravity** | `~/.antigravity/oauth_creds.json`       | OAuth-учетные данные Antigravity (поддержка Claude 4.5 Opus)     |
+| **iFlow**       | `~/.iflow/oauth_creds.json`             | OAuth-учетные данные iFlow (поддержка Qwen, Kimi, DeepSeek, GLM) |
+| **Codex**       | `~/.codex/oauth_creds.json`             | OAuth-учетные данные Codex                                       |
 
-> **Note**: `~` represents the user home directory (Windows: `C:\Users\username`, Linux/macOS: `/home/username` or `/Users/username`)
+> **Примечание**: `~` обозначает домашнюю директорию пользователя (Windows: `C:\Users\username`, Linux/macOS: `/home/username` или `/Users/username`)
 
-> **Custom Path**: Can specify custom storage location via relevant parameters in configuration file or environment variables
+> **Пользовательский путь**: можно указать произвольное место хранения через соответствующие параметры в конфиге или переменных окружения
 
 </details>
 
 ---
 
-### 🦙 Ollama Protocol Usage Examples
+### 🦙 Примеры использования протокола Ollama
 
-This project supports the Ollama protocol, allowing access to all supported models through a unified interface. The Ollama endpoint provides standard interfaces such as `/api/tags`, `/api/chat`, `/api/generate`, etc.
+Проект поддерживает протокол Ollama, позволяя обращаться ко всем поддерживаемым моделям через единый интерфейс. Ollama endpoint предоставляет стандартные интерфейсы вроде `/api/tags`, `/api/chat`, `/api/generate` и т.д.
 
-**Ollama API Call Examples**:
+**Примеры вызова Ollama API**:
 
-1. **List all available models**:
+1. **Список всех доступных моделей**:
 ```bash
 curl http://localhost:3000/ollama/api/tags \
   -H "Authorization: Bearer your-api-key"
 ```
 
-2. **Chat interface**:
+2. **Интерфейс чата**:
 ```bash
 curl http://localhost:3000/ollama/api/chat \
   -H "Content-Type: application/json" \
@@ -360,37 +374,37 @@ curl http://localhost:3000/ollama/api/chat \
   }'
 ```
 
-3. **Specify provider using model prefix**:
-- `[Kiro]` - Access Claude models using Kiro API
-- `[Claude]` - Use official Claude API
-- `[Gemini CLI]` - Access via Gemini CLI OAuth
-- `[OpenAI]` - Use official OpenAI API
-- `[Qwen CLI]` - Access via Qwen OAuth
+3. **Указание провайдера через префикс модели**:
+- `[Kiro]` - доступ к моделям Claude через Kiro API
+- `[Claude]` - использование официального Claude API
+- `[Gemini CLI]` - доступ через Gemini CLI OAuth
+- `[OpenAI]` - использование официального OpenAI API
+- `[Qwen CLI]` - доступ через Qwen OAuth
 
 ---
 
-### Advanced Configuration
+### Продвинутая конфигурация
 
 <details>
-<summary>Click to expand proxy configuration, model filtering, and Fallback advanced settings</summary>
+<summary>Нажмите, чтобы раскрыть продвинутые настройки прокси, фильтрации моделей и Fallback</summary>
 
-#### 1. Proxy Configuration
+#### 1. Настройка прокси
 
-This project supports flexible proxy configuration, allowing you to configure a unified proxy for different providers or use provider-specific proxied endpoints.
+Проект поддерживает гибкую конфигурацию прокси: можно настроить единый прокси для разных провайдеров или использовать проксированные endpoint для конкретных провайдеров.
 
-**Configuration Methods**:
+**Способы настройки**:
 
-1. **Web UI Configuration** (Recommended): Convenient configuration management
+1. **Настройка через Web UI** (рекомендуется): удобное управление конфигурацией
 
-  In the "Configuration" page of the Web UI, you can visually configure all proxy options:
-  - **Unified Proxy**: Fill in the proxy address in the "Proxy Settings" area and check the providers that need to use the proxy
-  - **Provider Endpoints**: In each provider's configuration area, directly modify the Base URL to a proxied endpoint
-  - **Click "Save Configuration"**: Takes effect immediately without restarting the service
+  На странице "Configuration" в Web UI вы можете визуально настроить все прокси-опции:
+  - **Unified Proxy**: заполните адрес прокси в области "Proxy Settings" и отметьте провайдеров, которым нужен прокси
+  - **Provider Endpoints**: в области конфигурации каждого провайдера напрямую измените Base URL на проксированный endpoint
+  - **Нажмите "Save Configuration"**: изменения применяются сразу, перезапуск сервиса не нужен
 
-2. **Unified Proxy Configuration**: Configure a global proxy and specify which providers use it
+2. **Настройка единого прокси**: укажите глобальный прокси и список провайдеров, которые его используют
 
-   - **Web UI Configuration**: Fill in the proxy address in the "Proxy Settings" area of the "Configuration" page and check the providers that need to use the proxy
-   - **Configuration File**: Configure in `configs/config.json`
+   - **Web UI**: заполните адрес прокси в области "Proxy Settings" на странице "Configuration" и отметьте нужных провайдеров
+   - **Файл конфигурации**: задайте настройки в `configs/config.json`
    ```json
    {
      "PROXY_URL": "http://127.0.0.1:7890",
@@ -402,10 +416,10 @@ This project supports flexible proxy configuration, allowing you to configure a 
    }
    ```
 
-3. **Provider-Specific Proxied Endpoints**: Some providers (like OpenAI, Claude) support configuring proxied API endpoints
+3. **Проксированные endpoint для конкретных провайдеров**: некоторые провайдеры (например OpenAI, Claude) поддерживают настройку проксированных API endpoint
 
-   - **Web UI Configuration**: In each provider's configuration area on the "Configuration" page, modify the corresponding Base URL
-   - **Configuration File**: Configure in `configs/config.json`
+   - **Web UI**: на странице "Configuration" в зоне настроек нужного провайдера измените соответствующий Base URL
+   - **Файл конфигурации**: задайте настройки в `configs/config.json`
    ```json
    {
      "OPENAI_BASE_URL": "https://your-proxy-endpoint.com/v1",
@@ -413,26 +427,26 @@ This project supports flexible proxy configuration, allowing you to configure a 
    }
    ```
 
-**Supported Proxy Types**:
+**Поддерживаемые типы прокси**:
 - **HTTP Proxy**: `http://127.0.0.1:7890`
 - **HTTPS Proxy**: `https://127.0.0.1:7890`
 - **SOCKS5 Proxy**: `socks5://127.0.0.1:1080`
 
-**Use Cases**:
-- **Network-Restricted Environments**: Use in network environments where Google, OpenAI, and other services cannot be accessed directly
-- **Hybrid Configuration**: Some providers use unified proxy, others use their own proxied endpoints
-- **Flexible Switching**: Enable/disable proxy for specific providers at any time in the Web UI
+**Сценарии использования**:
+- **Окружения с сетевыми ограничениями**: использование там, где нет прямого доступа к Google, OpenAI и другим сервисам
+- **Гибридная конфигурация**: часть провайдеров работает через единый прокси, часть - через собственные проксированные endpoint
+- **Гибкое переключение**: включение/отключение прокси для конкретных провайдеров в любой момент через Web UI
 
-**Notes**:
-- Proxy configuration priority: Unified proxy configuration > Provider-specific endpoints > Direct connection
-- Ensure the proxy service is stable and available, otherwise it may affect service quality
-- SOCKS5 proxy usually performs better than HTTP proxy
+**Примечания**:
+- Приоритет конфигурации прокси: единый прокси > endpoint конкретного провайдера > прямое подключение
+- Убедитесь, что прокси стабилен и доступен, иначе это повлияет на качество сервиса
+- SOCKS5-прокси обычно работает лучше HTTP-прокси
 
-#### 2. Model Filtering Configuration
+#### 2. Настройка фильтрации моделей
 
-Support excluding unsupported models through `notSupportedModels` configuration, the system will automatically skip these providers.
+Поддерживается исключение неподдерживаемых моделей через конфигурацию `notSupportedModels`; система автоматически пропускает такие провайдеры.
 
-**Configuration**: Add `notSupportedModels` field for providers in `configs/provider_pools.json`:
+**Конфигурация**: добавьте поле `notSupportedModels` у провайдера в `configs/provider_pools.json`:
 
 ```json
 {
@@ -446,19 +460,19 @@ Support excluding unsupported models through `notSupportedModels` configuration,
 }
 ```
 
-**How It Works**:
-- When requesting a specific model, the system automatically filters out providers that have configured the model as unsupported
-- Only providers that support the model will be selected to handle the request
+**Как это работает**:
+- При запросе конкретной модели система автоматически отфильтровывает провайдеров, где эта модель отмечена как неподдерживаемая
+- Для обработки запроса выбираются только провайдеры, поддерживающие модель
 
-**Use Cases**:
-- Some accounts cannot access specific models due to quota or permission restrictions
-- Need to assign different model access permissions to different accounts
+**Сценарии использования**:
+- Некоторые аккаунты не имеют доступа к конкретным моделям из-за ограничений квоты или прав
+- Нужно задавать разным аккаунтам разные права доступа к моделям
 
-#### 3. Provider Priority Configuration
+#### 3. Настройка приоритета провайдеров
 
-Support deterministic account ordering through a per-node `priority` field in `provider_pools.json`.
+Поддерживается детерминированный порядок аккаунтов через поле `priority` на уровне ноды в `provider_pools.json`.
 
-**Configuration** (smaller number = higher priority):
+**Конфигурация** (чем меньше число, тем выше приоритет):
 
 ```json
 {
@@ -477,17 +491,17 @@ Support deterministic account ordering through a per-node `priority` field in `p
 }
 ```
 
-**How It Works**:
-- The pool manager first filters healthy/available nodes by the lowest `priority` value
-- Only nodes in that highest-priority tier participate in LRU/score-based balancing
-- If the whole highest-priority tier becomes unavailable, the next priority tier is used automatically
-- If `priority` is omitted or invalid, default `100` is applied (backward compatible behavior)
+**Как это работает**:
+- Менеджер пула сначала фильтрует здоровые/доступные ноды по наименьшему значению `priority`
+- В балансировке LRU/score участвуют только ноды из этого самого приоритетного уровня
+- Если весь самый приоритетный уровень недоступен, автоматически используется следующий уровень приоритета
+- Если `priority` пропущен или невалиден, применяется значение `100` (обратная совместимость)
 
-#### 4. Cross-Type Fallback Configuration
+#### 4. Настройка fallback между типами
 
-When all accounts under a Provider Type (e.g., `gemini-cli-oauth`) are exhausted due to 429 quota limits or marked as unhealthy, the system can automatically fallback to another compatible Provider Type (e.g., `gemini-antigravity`) instead of returning an error directly.
+Когда все аккаунты внутри одного типа Provider (например, `gemini-cli-oauth`) исчерпаны из-за ограничений 429 или отмечены как нездоровые, система может автоматически переключиться на другой совместимый тип Provider (например, `gemini-antigravity`) вместо немедленной ошибки.
 
-**Configuration**: Add `providerFallbackChain` configuration in `configs/config.json`:
+**Конфигурация**: добавьте конфигурацию `providerFallbackChain` в `configs/config.json`:
 
 ```json
 {
@@ -500,22 +514,22 @@ When all accounts under a Provider Type (e.g., `gemini-cli-oauth`) are exhausted
 }
 ```
 
-**How It Works**:
-1. Try to select a healthy account from the primary Provider Type pool
-2. If all accounts in that type are unhealthy or return 429:
-   - Look up the configured fallback types
-   - Check if the fallback type supports the requested model (protocol compatibility check)
-   - Select a healthy account from the fallback type's pool
-3. Supports multi-level degradation chains: `gemini-cli-oauth → gemini-antigravity → openai-custom`
-4. Only returns an error if all fallback types are also unavailable
+**Как это работает**:
+1. Пытается выбрать здоровый аккаунт из пула основного Provider Type
+2. Если все аккаунты этого типа нездоровы или возвращают 429:
+   - ищутся настроенные fallback-типы
+   - проверяется, поддерживает ли fallback-тип запрошенную модель (проверка совместимости протокола)
+   - выбирается здоровый аккаунт из пула fallback-типа
+3. Поддерживаются многоуровневые цепочки деградации: `gemini-cli-oauth → gemini-antigravity → openai-custom`
+4. Ошибка возвращается только если все fallback-типы тоже недоступны
 
-**Use Cases**:
-- In batch task scenarios, the free RPD quota of a single Provider Type can be easily exhausted in a short time
-- Through cross-type Fallback, you can fully utilize the independent quotas of multiple Providers, improving overall availability and throughput
+**Сценарии использования**:
+- В batch-сценариях бесплатная RPD-квота одного Provider Type может быстро исчерпаться
+- Благодаря fallback между типами можно полностью использовать независимые квоты нескольких провайдеров, повышая общую доступность и пропускную способность
 
-**Notes**:
-- Fallback only occurs between protocol-compatible types (e.g., between `gemini-*`, between `claude-*`)
-- The system automatically checks if the target Provider Type supports the requested model
+**Примечания**:
+- Fallback происходит только между типами, совместимыми по протоколу (например, между `gemini-*`, между `claude-*`)
+- Система автоматически проверяет, поддерживает ли целевой Provider Type запрошенную модель
 
 </details>
 
@@ -524,24 +538,24 @@ When all accounts under a Provider Type (e.g., `gemini-cli-oauth`) are exhausted
 ## ❓ FAQ
 
 <details>
-<summary>Click to expand FAQ and solutions (port occupation, Docker startup, 429 errors, etc.)</summary>
+<summary>Нажмите, чтобы раскрыть FAQ и решения (занятые порты, запуск Docker, ошибки 429 и т.д.)</summary>
 
-### 1. OAuth Authorization Failed
+### 1. Ошибка OAuth-авторизации
 
-**Problem Description**: After clicking "Generate Authorization", the browser opens the authorization page but authorization fails or cannot be completed.
+**Описание проблемы**: после нажатия "Generate Authorization" браузер открывает страницу авторизации, но авторизация не завершается или завершается ошибкой.
 
-**Solutions**:
-- **Check Network Connection**: Ensure you can access Google, Alibaba Cloud, and other services normally
-- **Check Port Occupation**: OAuth callbacks require specific ports (Gemini: 8085, Antigravity: 8086, iFlow: 8087, Codex: 1455, Kiro: 19876-19880), ensure these ports are not occupied
-- **Clear Browser Cache**: Try using incognito mode or clearing browser cache and retry
-- **Check Firewall Settings**: Ensure the firewall allows access to local callback ports
-- **Docker Users**: Ensure all OAuth callback ports are correctly mapped
+**Решения**:
+- **Проверьте сетевое подключение**: убедитесь, что у вас есть доступ к Google, Alibaba Cloud и другим сервисам
+- **Проверьте занятые порты**: для OAuth callback нужны конкретные порты (Gemini: 8085, Antigravity: 8086, iFlow: 8087, Codex: 1455, Kiro: 19876-19880), убедитесь, что они свободны
+- **Очистите кэш браузера**: попробуйте режим инкогнито или очистку кэша
+- **Проверьте настройки firewall**: убедитесь, что firewall разрешает доступ к локальным callback-портам
+- **Пользователи Docker**: убедитесь, что все OAuth callback-порты корректно проброшены
 
-### 2. Port Already in Use
+### 2. Порт уже используется
 
-**Problem Description**: When starting the service, it shows the port is already in use (e.g., `EADDRINUSE`).
+**Описание проблемы**: при запуске сервиса появляется ошибка о занятом порте (например, `EADDRINUSE`).
 
-**Solutions**:
+**Решения**:
 ```bash
 # Windows - Find the process occupying the port
 netstat -ano | findstr :3000
@@ -552,140 +566,139 @@ lsof -i :3000
 kill -9 <PID>
 ```
 
-Or modify the port configuration in `configs/config.json` to use a different port.
+Или измените конфигурацию порта в `configs/config.json` и используйте другой порт.
 
-### 3. Docker Container Won't Start
+### 3. Docker-контейнер не запускается
 
-**Problem Description**: Docker container fails to start or exits immediately.
+**Описание проблемы**: Docker-контейнер не запускается или сразу завершается.
 
-**Solutions**:
-- **Check Logs**: `docker logs aiclient2api` to view error messages
-- **Check Mount Path**: Ensure the local path in the `-v` parameter exists and has read/write permissions
-- **Check Port Conflicts**: Ensure all mapped ports are not occupied on the host
-- **Re-pull Image**: `docker pull nikzmx/aiclient-2-api:latest`
+**Решения**:
+- **Проверьте логи**: `docker logs aiclient2api` для просмотра ошибки
+- **Проверьте путь монтирования**: убедитесь, что локальный путь в параметре `-v` существует и имеет права на чтение/запись
+- **Проверьте конфликт портов**: убедитесь, что все проброшенные порты на хосте свободны
+- **Перетяните образ заново**: `docker pull nikzmx/aiclient-2-api:latest`
 
-### 4. Credential File Not Recognized
+### 4. Файл учетных данных не распознается
 
-**Problem Description**: After uploading or configuring credential files, the system shows it cannot be recognized or format error.
+**Описание проблемы**: после загрузки или настройки файла учетных данных система показывает ошибку распознавания или формата.
 
-**Solutions**:
-- **Check File Format**: Ensure the credential file is valid JSON format
-- **Check File Path**: Ensure the file path is correct, Docker users need to ensure the file is in the mounted directory
-- **Check File Permissions**: Ensure the service has permission to read the credential file
-- **Regenerate Credentials**: If credentials have expired, try re-authorizing via OAuth
+**Решения**:
+- **Проверьте формат файла**: файл учетных данных должен быть валидным JSON
+- **Проверьте путь к файлу**: путь должен быть корректным; в Docker файл должен находиться в смонтированной директории
+- **Проверьте права доступа**: сервис должен иметь права на чтение файла учетных данных
+- **Сгенерируйте учетные данные заново**: если учетные данные истекли, повторите OAuth-авторизацию
 
-### 5. Request Returns 429 Error
+### 5. Запрос возвращает ошибку 429
 
-**Problem Description**: API requests frequently return 429 Too Many Requests error.
+**Описание проблемы**: API-запросы часто возвращают 429 Too Many Requests.
 
-**Solutions**:
-- **Configure Account Pool**: Add multiple accounts to `provider_pools.json`, enable polling mechanism
-- **Configure Fallback**: Configure `providerFallbackChain` in `config.json` for cross-type degradation
-- **Reduce Request Frequency**: Appropriately increase request intervals to avoid triggering rate limits
-- **Wait for Quota Reset**: Free quotas usually reset daily or per minute
+**Решения**:
+- **Настройте пул аккаунтов**: добавьте несколько аккаунтов в `provider_pools.json`, включите механизм опроса
+- **Настройте fallback**: задайте `providerFallbackChain` в `config.json` для деградации между типами
+- **Снизьте частоту запросов**: увеличьте интервалы между запросами, чтобы не упираться в rate limit
+- **Дождитесь сброса квоты**: бесплатные квоты обычно обновляются ежедневно или поминутно
 
-### 6. Model Unavailable or Returns Error
+### 6. Модель недоступна или возвращает ошибку
 
-**Problem Description**: When requesting a specific model, it returns an error or shows the model is unavailable.
+**Описание проблемы**: при запросе конкретной модели возвращается ошибка или указано, что модель недоступна.
 
-**Solutions**:
-- **Check Model Name**: Ensure you're using the correct model name (case-sensitive)
-- **Check Provider Support**: Confirm the currently configured provider supports that model
-- **Check Account Permissions**: Some advanced models may require specific account permissions
-- **Configure Model Filtering**: Use `notSupportedModels` to exclude unsupported models
+**Решения**:
+- **Проверьте имя модели**: используйте корректное имя модели (чувствительно к регистру)
+- **Проверьте поддержку у провайдера**: убедитесь, что текущий провайдер поддерживает эту модель
+- **Проверьте права аккаунта**: для некоторых продвинутых моделей нужны специальные права
+- **Настройте фильтрацию моделей**: используйте `notSupportedModels` для исключения неподдерживаемых моделей
 
-### 7. Web UI Cannot Be Accessed
+### 7. Web UI недоступен
 
-**Problem Description**: Browser cannot open `http://localhost:3000`.
+**Описание проблемы**: браузер не открывает `http://localhost:3000`.
 
-**Solutions**:
-- **Check Service Status**: Confirm the service has started successfully, check terminal output
-- **Check Port Mapping**: Docker users ensure `-p 3000:3000` parameter is correct
-- **Try Other Address**: Try accessing `http://127.0.0.1:3000`
-- **Check Firewall**: Ensure the firewall allows access to port 3000
+**Решения**:
+- **Проверьте состояние сервиса**: убедитесь, что сервис успешно запущен, проверьте вывод терминала
+- **Проверьте проброс портов**: пользователи Docker должны проверить параметр `-p 3000:3000`
+- **Попробуйте другой адрес**: откройте `http://127.0.0.1:3000`
+- **Проверьте firewall**: убедитесь, что доступ к порту 3000 разрешен
 
-### 8. Streaming Response Interrupted
+### 8. Потоковый ответ прерывается
 
-**Problem Description**: When using streaming output, the response is interrupted midway or incomplete.
+**Описание проблемы**: при streaming-выводе ответ обрывается посередине или приходит неполным.
 
-**Solutions**:
-- **Check Network Stability**: Ensure network connection is stable
-- **Increase Timeout**: Increase request timeout in client configuration
-- **Check Proxy Settings**: If using a proxy, ensure the proxy supports long connections
-- **Check Service Logs**: Check for error messages
+**Решения**:
+- **Проверьте стабильность сети**: сетевое соединение должно быть стабильным
+- **Увеличьте timeout**: увеличьте timeout запроса в конфигурации клиента
+- **Проверьте прокси-настройки**: если используете прокси, убедитесь, что прокси поддерживает долгие соединения
+- **Проверьте логи сервиса**: проверьте наличие сообщений об ошибках
 
-### 9. Configuration Changes Not Taking Effect
+### 9. Изменения конфигурации не применяются
 
-**Problem Description**: After modifying configuration in Web UI, service behavior doesn't change.
+**Описание проблемы**: после изменения конфигурации в Web UI поведение сервиса не меняется.
 
-**Solutions**:
-- **Refresh Page**: Refresh the Web UI page after modification
-- **Check Save Status**: Confirm the configuration was saved successfully (check prompt messages)
-- **Restart Service**: Some configurations may require service restart to take effect
-- **Check Configuration File**: Directly check `configs/config.json` to confirm changes were written
+**Решения**:
+- **Обновите страницу**: после изменений обновите страницу Web UI
+- **Проверьте статус сохранения**: убедитесь, что конфигурация успешно сохранена (проверьте сообщения-подсказки)
+- **Перезапустите сервис**: часть настроек может требовать перезапуска
+- **Проверьте файл конфигурации**: напрямую проверьте `configs/config.json`, что изменения записались
 
-### 10. API Returns 404
+### 10. API возвращает 404
 
-**Problem Description**: When calling API endpoints, it returns 404 Not Found error.
+**Описание проблемы**: при вызове API endpoint возвращается 404 Not Found.
 
-**Solutions**:
-- **Check Endpoint Path**: Ensure you're using the correct endpoint path, such as `/v1/chat/completions`, `/ollama/api/chat`, etc.
-- **Check Client Auto-completion**: Some clients (like Cherry-Studio, NextChat) automatically append paths (like `/v1/chat/completions`) after the Base URL, causing path duplication. Check the actual request URL in the console and remove redundant path parts
-- **Check Service Status**: Confirm the service has started normally, visit `http://localhost:3000` to view Web UI
-- **Check Port Configuration**: Ensure requests are sent to the correct port (default 3000)
-- **View Available Routes**: Check "Interactive Routing Examples" on the Web UI dashboard page to see all available endpoints
+**Решения**:
+- **Проверьте путь endpoint**: используйте корректный путь, например `/v1/chat/completions`, `/ollama/api/chat` и т.д.
+- **Проверьте автодополнение путей в клиенте**: некоторые клиенты (Cherry-Studio, NextChat) автоматически дописывают путь (например `/v1/chat/completions`) после Base URL, что приводит к дублированию. Проверьте фактический URL запроса в консоли и удалите лишние части
+- **Проверьте состояние сервиса**: убедитесь, что сервис запущен, откройте `http://localhost:3000` для проверки Web UI
+- **Проверьте конфигурацию порта**: запросы должны идти на корректный порт (по умолчанию 3000)
+- **Посмотрите доступные роуты**: проверьте "Interactive Routing Examples" на странице Dashboard в Web UI
 
 ### 11. Unauthorized: API key is invalid or missing
 
-**Problem Description**: When calling API endpoints, it returns `Unauthorized: API key is invalid or missing.` error.
+**Описание проблемы**: при вызове API endpoint возвращается ошибка `Unauthorized: API key is invalid or missing.`.
 
-**Solutions**:
-- **Check API Key Configuration**: Ensure API Key is correctly configured in `configs/config.json` or Web UI
-- **Check Request Header Format**: Ensure the request contains the correct Authorization header format, such as `Authorization: Bearer your-api-key`
-- **Check Service Logs**: View detailed error messages on the "Real-time Logs" page in Web UI to locate the specific cause
+**Решения**:
+- **Проверьте конфигурацию API Key**: убедитесь, что API Key корректно задан в `configs/config.json` или Web UI
+- **Проверьте формат заголовка**: в запросе должен быть корректный заголовок Authorization, например `Authorization: Bearer your-api-key`
+- **Проверьте логи сервиса**: на странице "Real-time Logs" в Web UI можно посмотреть детальные ошибки и найти причину
 
 ### 12. No available and healthy providers for type
 
-**Problem Description**: When calling API, it returns `No available and healthy providers for type xxx` error.
+**Описание проблемы**: при вызове API возвращается ошибка `No available and healthy providers for type xxx`.
 
-**Solutions**:
-- **Check Provider Status**: Check if providers of the corresponding type are in healthy status on the "Provider Pools" page in Web UI
-- **Check Credential Validity**: Confirm OAuth credentials have not expired; if expired, regenerate authorization
-- **Check Quota Limits**: Some providers may have reached free quota limits; wait for quota reset or add more accounts
-- **Enable Fallback**: Configure `providerFallbackChain` in `config.json` to automatically switch to backup providers when the primary provider is unavailable
-- **View Detailed Logs**: Check specific health check failure reasons on the "Real-time Logs" page in Web UI
+**Решения**:
+- **Проверьте статус провайдеров**: на странице "Provider Pools" в Web UI проверьте, что провайдеры нужного типа находятся в здоровом состоянии
+- **Проверьте актуальность учетных данных**: убедитесь, что OAuth-учетные данные не истекли; если истекли, выполните авторизацию заново
+- **Проверьте квотные лимиты**: часть провайдеров может исчерпать бесплатную квоту; дождитесь сброса или добавьте аккаунты
+- **Включите fallback**: настройте `providerFallbackChain` в `config.json`, чтобы автоматически переключаться на резервных провайдеров
+- **Проверьте детальные логи**: на странице "Real-time Logs" в Web UI можно увидеть конкретные причины провала health check
 
-### 13. Request Returns 403 Forbidden Error
+### 13. Запрос возвращает ошибку 403 Forbidden
 
-**Problem Description**: API requests return 403 Forbidden error.
+**Описание проблемы**: API-запросы возвращают 403 Forbidden.
 
-**Solutions**:
-- **Check Node Status**: If you see the node status is normal (health check passed) on the "Provider Pools" page in Web UI, you can ignore this error as the system will handle it automatically
-- **Check Account Permissions**: Confirm the account has permission to access the requested model or service
-- **Check API Key Permissions**: Some providers' API Keys may have access scope restrictions; ensure the Key has sufficient permissions
-- **Check Regional Restrictions**: Some services may have regional access restrictions; try using a proxy or VPN
-- **Check Credential Status**: OAuth credentials may have been revoked or expired; try regenerating authorization
-- **Check Request Frequency**: Some providers have strict request frequency limits; reduce request frequency and retry
-- **View Provider Documentation**: Visit the official documentation of the corresponding provider to understand specific access restrictions and requirements
+**Решения**:
+- **Проверьте статус ноды**: если в Web UI на странице "Provider Pools" видно, что нода в норме (health check пройден), ошибку можно игнорировать, система обработает ее автоматически
+- **Проверьте права аккаунта**: убедитесь, что аккаунт имеет доступ к запрошенной модели или сервису
+- **Проверьте права API Key**: у API Key некоторых провайдеров ограничена область доступа; убедитесь, что у ключа достаточно прав
+- **Проверьте региональные ограничения**: некоторые сервисы ограничены по регионам; попробуйте прокси или VPN
+- **Проверьте состояние учетных данных**: OAuth-учетные данные могли быть отозваны или истечь; попробуйте переавторизацию
+- **Проверьте частоту запросов**: у некоторых провайдеров строгие лимиты частоты; снизьте нагрузку и повторите
+- **Изучите документацию провайдера**: проверьте официальную документацию соответствующего провайдера по ограничениям доступа и требованиям
 
 </details>
 
 ---
 
-## 📄 Open Source License
+## 📄 Лицензия open source
 
-This project follows the [**GNU General Public License v3 (GPLv3)**](https://www.gnu.org/licenses/gpl-3.0) license. For details, please check the `LICENSE` file in the root directory.
+Проект распространяется по лицензии [**GNU General Public License v3 (GPLv3)**](https://www.gnu.org/licenses/gpl-3.0). Подробности смотрите в файле `LICENSE` в корне проекта.
 
-## 🙏 Acknowledgements
+## 🙏 Благодарности
 
-The development of this project was greatly inspired by the official Google Gemini CLI and referenced part of the code implementation of `gemini-cli.ts` in Cline 3.18.0. Sincere thanks to the Google official team and the Cline development team for their excellent work!
+Разработка этого проекта во многом вдохновлена официальным Google Gemini CLI, а также частично опирается на реализацию кода `gemini-cli.ts` из Cline 3.18.0. Искренняя благодарность команде Google и команде разработки Cline за отличную работу!
 
-### Contributor List
+### Список участников
 
-Thanks to all the developers who contributed to the AIClient-2-API project:
+Спасибо всем разработчикам, которые внесли вклад в проект AIClient-2-API:
 
 [![Contributors](https://contrib.rocks/image?repo=mxnix/AIClient-2-API)](https://github.com/mxnix/AIClient-2-API/graphs/contributors)
-
 
 ### 🌟 Star History
 
@@ -694,19 +707,20 @@ Thanks to all the developers who contributed to the AIClient-2-API project:
 
 ---
 
-## ⚠️ Disclaimer
+## ⚠️ Отказ от ответственности
 
-### Usage Risk Warning
-This project (AIClient-2-API) is for learning and research purposes only. Users assume all risks when using this project. The author is not responsible for any direct, indirect, or consequential losses resulting from the use of this project.
+### Предупреждение о рисках использования
+Этот проект (AIClient-2-API) предназначен только для обучения и исследований. Пользователь принимает на себя все риски, связанные с использованием проекта. Автор не несет ответственности за любые прямые, косвенные или последующие убытки, возникшие в результате использования проекта.
 
-### Third-Party Service Responsibility Statement
-This project is an API proxy tool and does not provide any AI model services. All AI model services are provided by their respective third-party providers (such as Google, OpenAI, Anthropic, etc.). Users should comply with the terms of service and policies of each third-party service when accessing them through this project. The author is not responsible for the availability, quality, security, or legality of third-party services.
+### Заявление об ответственности за сторонние сервисы
+Этот проект является инструментом API-проксирования и не предоставляет AI-модели сам по себе. Все AI-модельные сервисы предоставляются соответствующими сторонними провайдерами (Google, OpenAI, Anthropic и т.д.). Пользователь обязан соблюдать условия использования и политики каждого стороннего сервиса при доступе через этот проект. Автор не несет ответственности за доступность, качество, безопасность и легальность сторонних сервисов.
 
-### Data Privacy Statement
-This project runs locally and does not collect or upload any user data. However, users should protect their API keys and other sensitive information when using this project. It is recommended that users regularly check and update their API keys and avoid using this project in insecure network environments.
+### Заявление о конфиденциальности данных
+Проект работает локально и не собирает и не загружает пользовательские данные. Тем не менее пользователи должны защищать API-ключи и другую чувствительную информацию. Рекомендуется регулярно проверять и обновлять API-ключи и не использовать проект в небезопасных сетевых средах.
 
-### Legal Compliance Reminder
-Users should comply with the laws and regulations of their country/region when using this project. It is strictly prohibited to use this project for any illegal purposes. Any consequences resulting from users' violation of laws and regulations shall be borne by the users themselves.
+### Напоминание о соблюдении законодательства
+Пользователь обязан соблюдать законы и нормативные требования своей страны/региона при использовании проекта. Строго запрещено использовать проект в незаконных целях. Все последствия нарушения законодательства полностью несет пользователь.
+
 
 
 

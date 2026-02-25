@@ -18,7 +18,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/mxnix/AIClient-2-API.svg?style=flat&label=Star)](https://github.com/mxnix/AIClient-2-API/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/mxnix/AIClient-2-API.svg)](https://github.com/mxnix/AIClient-2-API/issues)
 
-[**🔧 OpenClaw 設定**](./docs/OPENCLAW_CONFIG_GUIDE-JA.md) | [中文](./README-ZH.md) | [English](./README.md) | [**👉 日本語**](./README-JA.md) | [Русский](./README-RU.md) | [**📚 完全ドキュメント**](https://aiproxy.justlikemaki.vip/ja/)
+[**🔧 OpenClaw 設定**](./docs/OPENCLAW_CONFIG_GUIDE-JA.md) | [中文](./README-ZH.md) | [English](./README-EN.md) | [**👉 日本語**](./README-JA.md) | [Русский](./README.md) | [**📚 完全ドキュメント**](https://aiproxy.justlikemaki.vip/ja/)
 
 </div>
 
