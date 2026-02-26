@@ -3,7 +3,22 @@ set -euo pipefail
 
 REPO_URL="https://github.com/mxnix/AIClient-2-API"
 REPO_NAME="AIClient-2-API"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+resolve_script_dir() {
+  local source_path="${BASH_SOURCE[0]:-}"
+
+  if [[ -n "$source_path" && "$source_path" != "stdin" ]]; then
+    local source_dir
+    source_dir="$(dirname -- "$source_path")"
+    if [[ -n "$source_dir" ]] && cd "$source_dir" >/dev/null 2>&1; then
+      pwd
+      return 0
+    fi
+  fi
+
+  pwd
+}
+
+SCRIPT_DIR="$(resolve_script_dir)"
 PROJECT_DIR=""
 QUIET=1
 
