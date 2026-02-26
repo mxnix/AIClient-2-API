@@ -292,6 +292,48 @@ export async function handleUnifiedResponse(res, responsePayload, isStream) {
     }
 }
 
+function tryMarkProviderWithQuotaRecovery({
+    error,
+    status,
+    providerPoolManager,
+    toProvider,
+    pooluuid,
+    skipErrorCount,
+    skipCredentialSwitch,
+    credentialMarkedUnhealthy,
+    context,
+}) {
+    if (credentialMarkedUnhealthy || skipErrorCount || skipCredentialSwitch) {
+        return false;
+    }
+
+    if (status !== 429 || !providerPoolManager || !pooluuid) {
+        return false;
+    }
+
+    if (typeof providerPoolManager.markProviderUnhealthyWithRecoveryTime !== 'function') {
+        return false;
+    }
+
+    const quotaRecoveryDelayMs = Number(error?.quotaRecoveryDelayMs);
+    if (!Number.isFinite(quotaRecoveryDelayMs) || quotaRecoveryDelayMs <= 0) {
+        return false;
+    }
+
+    // Add a small safety buffer to avoid recovering slightly before upstream quota reset is effective.
+    const effectiveDelayMs = Math.round(quotaRecoveryDelayMs + 1000);
+    const recoveryTime = new Date(Date.now() + effectiveDelayMs);
+    logger.info(`[Provider Pool] Scheduling cooldown for ${toProvider} (${pooluuid}) due to 429 ${context}. Recovery in ${effectiveDelayMs}ms at ${recoveryTime.toISOString()}`);
+
+    providerPoolManager.markProviderUnhealthyWithRecoveryTime(
+        toProvider,
+        { uuid: pooluuid },
+        error.message,
+        recoveryTime
+    );
+    return true;
+}
+
 export async function handleStreamRequest(res, service, model, requestBody, fromProvider, toProvider, PROMPT_LOG_MODE, PROMPT_LOG_FILENAME, providerPoolManager, pooluuid, customName, retryContext = null) {
     let fullResponseText = '';
     let fullResponseJson = '';
@@ -511,6 +553,21 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         
         // 检查凭证是否已在底层被标记为不健康（避免重复标记）
         let credentialMarkedUnhealthy = error.credentialMarkedUnhealthy === true;
+
+        // 对于带有上游重置时间提示的 429，直接将当前凭证放入 cooldown，避免短时间内反复命中同一限制。
+        if (tryMarkProviderWithQuotaRecovery({
+            error,
+            status,
+            providerPoolManager,
+            toProvider,
+            pooluuid,
+            skipErrorCount,
+            skipCredentialSwitch,
+            credentialMarkedUnhealthy,
+            context: 'during stream error handling'
+        })) {
+            credentialMarkedUnhealthy = true;
+        }
         
         // 如果底层未标记，且不跳过错误计数，则在此处标记
         if (!credentialMarkedUnhealthy && !skipErrorCount && !skipCredentialSwitch && providerPoolManager && pooluuid) {
@@ -719,6 +776,21 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         
         // 检查凭证是否已在底层被标记为不健康（避免重复标记）
         let credentialMarkedUnhealthy = error.credentialMarkedUnhealthy === true;
+
+        // 对于带有上游重置时间提示的 429，直接将当前凭证放入 cooldown，避免短时间内反复命中同一限制。
+        if (tryMarkProviderWithQuotaRecovery({
+            error,
+            status,
+            providerPoolManager,
+            toProvider,
+            pooluuid,
+            skipErrorCount,
+            skipCredentialSwitch,
+            credentialMarkedUnhealthy,
+            context: 'during unary error handling'
+        })) {
+            credentialMarkedUnhealthy = true;
+        }
         
         // 如果底层未标记，且不跳过错误计数，则在此处标记
         if (!credentialMarkedUnhealthy && !skipErrorCount && !skipCredentialSwitch && providerPoolManager && pooluuid) {

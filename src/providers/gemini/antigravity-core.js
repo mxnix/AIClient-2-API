@@ -146,6 +146,14 @@ function extractRetryDelayFromPayloadMs(payload) {
         }
     }
 
+    const quotaResetRegex = /quota will reset after\s+([0-9]+(?:\.[0-9]+)?(?:ms|s))/ig;
+    while ((match = quotaResetRegex.exec(text)) !== null) {
+        const parsed = parseDurationToMs(match[1]);
+        if (parsed !== null) {
+            delayCandidates.push(parsed);
+        }
+    }
+
     const delayFieldRegex = /"(?:retryDelay|quotaResetDelay)"\s*:\s*"([0-9]+(?:\.[0-9]+)?(?:ms|s))"/ig;
     while ((match = delayFieldRegex.exec(text)) !== null) {
         const parsed = parseDurationToMs(match[1]);
@@ -1353,6 +1361,13 @@ export class AntigravityApiService {
                 return this.callApi(method, body, isRetry, retryCount + 1, baseURLIndex);
             }
 
+            if (status === 429) {
+                const quotaRecoveryDelayMs = getQuotaRetryDelayHintMs(error);
+                if (Number.isFinite(quotaRecoveryDelayMs) && quotaRecoveryDelayMs > 0) {
+                    error.quotaRecoveryDelayMs = quotaRecoveryDelayMs;
+                }
+            }
+
             if ((status >= 500 && status < 600) || isNetworkError) {
                 // Avoid a second retry wave at pool-switch layer for transient upstream failures.
                 error.skipCredentialSwitch = true;
@@ -1466,6 +1481,13 @@ export class AntigravityApiService {
                 await new Promise(resolve => setTimeout(resolve, delay));
                 yield* this.streamApi(method, body, isRetry, retryCount + 1, baseURLIndex);
                 return;
+            }
+
+            if (status === 429) {
+                const quotaRecoveryDelayMs = getQuotaRetryDelayHintMs(error);
+                if (Number.isFinite(quotaRecoveryDelayMs) && quotaRecoveryDelayMs > 0) {
+                    error.quotaRecoveryDelayMs = quotaRecoveryDelayMs;
+                }
             }
 
             if ((status >= 500 && status < 600) || isNetworkError) {
