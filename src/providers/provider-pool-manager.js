@@ -3,7 +3,7 @@ import * as crypto from 'crypto';
 import { getServiceAdapter } from './adapter.js';
 import logger from '../utils/logger.js';
 import { MODEL_PROVIDER, getProtocolPrefix } from '../utils/common.js';
-import { normalizeProviderModel, isProviderModelSupported } from './provider-models.js';
+import { normalizeProviderModel, isProviderModelSupported, getProviderModels } from './provider-models.js';
 import { broadcastEvent } from '../ui-modules/event-broadcast.js';
 import axios from 'axios';
 
@@ -112,7 +112,21 @@ export class ProviderPoolManager {
 
                 if (configPath && fs.existsSync(configPath)) {
                     try {
-                        if (true) {
+                        const tempConfig = {
+                            ...this.globalConfig,
+                            ...config,
+                            MODEL_PROVIDER: providerType
+                        };
+                        const serviceAdapter = getServiceAdapter(tempConfig);
+
+                        let shouldRefresh = false;
+                        if (typeof serviceAdapter.isExpiryDateNear === 'function') {
+                            shouldRefresh = serviceAdapter.isExpiryDateNear() === true;
+                        } else {
+                            this._log('debug', `Adapter for ${providerType} does not support isExpiryDateNear(), skipping expiry check.`);
+                        }
+
+                        if (shouldRefresh) {
                             this._log('warn', `Node ${providerStatus.uuid} (${providerType}) is near expiration. Enqueuing refresh...`);
                             this._enqueueRefresh(providerType, providerStatus);
                         }
@@ -1397,6 +1411,10 @@ export class ProviderPoolManager {
         if (provider) {
             provider.config.needsRefresh = false;
             provider.config.refreshCount = 0;
+            provider.config.isHealthy = true;
+            provider.config.errorCount = 0;
+            provider.config.lastErrorTime = null;
+            provider.config.lastErrorMessage = null;
             // 更新为可用
             provider.config.lastHealthCheckTime = new Date().toISOString();
             // 标记为健康，以便立即投入使用

@@ -174,6 +174,38 @@ function computeQuotaRetryDelayMs(baseDelay, retryCount, quotaRetryDelayHintMs =
     return Math.max(0, Math.round(minimumDelay + jitter));
 }
 
+function isAuthFailureResponse(status, error) {
+    if (status === 401) {
+        return true;
+    }
+
+    if (status !== 400) {
+        return false;
+    }
+
+    const details = error?.response?.data;
+    let detailsText = '';
+    try {
+        detailsText = typeof details === 'string' ? details : JSON.stringify(details || '');
+    } catch {
+        detailsText = String(details || '');
+    }
+
+    const messageText = String(error?.message || '');
+    const combinedText = `${messageText} ${detailsText}`.toLowerCase();
+    const authHints = [
+        'unauth',
+        'invalid_grant',
+        'invalid_token',
+        'token expired',
+        'access token expired',
+        'credential',
+        'oauth'
+    ];
+
+    return authHints.some((hint) => combinedText.includes(hint));
+}
+
 function createUnsupportedModelError(requestedModel, normalizedModel = requestedModel) {
     const requested = typeof requestedModel === 'string' && requestedModel.trim()
         ? requestedModel
@@ -386,6 +418,7 @@ export class GeminiApiService {
         this.oauthCredsBase64 = config.GEMINI_OAUTH_CREDS_BASE64;
         this.oauthCredsFilePath = config.GEMINI_OAUTH_CREDS_FILE_PATH;
         this.projectId = config.PROJECT_ID;
+        this.uuid = config.uuid;
 
         this.codeAssistEndpoint = config.GEMINI_BASE_URL || DEFAULT_CODE_ASSIST_ENDPOINT;
         this.apiVersion = DEFAULT_CODE_ASSIST_API_VERSION;
@@ -502,7 +535,7 @@ export class GeminiApiService {
 
     async getNewToken(credPath) {
         // 使用统一的 OAuth 处理方法
-        const { authUrl, authInfo } = await handleGeminiCliOAuth(this.config);
+        const { authUrl, authInfo } = await handleGeminiCliOAuth(this.config, { credPath });
         
         logger.info('\n[Gemini Auth] 正在自动打开浏览器进行授权...');
         logger.info('[Gemini Auth] 授权链接:', authUrl, '\n');
@@ -666,14 +699,14 @@ export class GeminiApiService {
                 }
             }
 
-            // Handle 401 (Unauthorized) - refresh auth and retry once
-            if ((status === 400 || status === 401) && !isRetry) {
-                logger.info('[Gemini API] Received 401/400. Triggering background refresh via PoolManager...');
+            // Handle authentication failures - mark for background refresh and switch credential
+            if (isAuthFailureResponse(status, error) && !isRetry) {
+                logger.info(`[Gemini API] Received auth error (status: ${status}). Triggering background refresh via PoolManager...`);
                 
                 // 标记当前凭证为不健康（会自动进入刷新队列）
                 const poolManager = getProviderPoolManager();
                 if (poolManager && this.uuid) {
-                    logger.info(`[Gemini] Marking credential ${this.uuid} as needs refresh. Reason: 401/400 Unauthorized`);
+                    logger.info(`[Gemini] Marking credential ${this.uuid} as needs refresh. Reason: auth error status ${status}`);
                     poolManager.markProviderNeedRefresh(MODEL_PROVIDER.GEMINI_CLI, {
                         uuid: this.uuid
                     });
@@ -765,14 +798,14 @@ export class GeminiApiService {
                 }
             }
 
-            // Handle 401 (Unauthorized) - refresh auth and retry once
-            if ((status === 400 || status === 401) && !isRetry) {
-                logger.info('[Gemini API] Received 401/400 during stream. Triggering background refresh via PoolManager...');
+            // Handle authentication failures - mark for background refresh and switch credential
+            if (isAuthFailureResponse(status, error) && !isRetry) {
+                logger.info(`[Gemini API] Received auth error during stream (status: ${status}). Triggering background refresh via PoolManager...`);
                 
                 // 标记当前凭证为不健康（会自动进入刷新队列）
                 const poolManager = getProviderPoolManager();
                 if (poolManager && this.uuid) {
-                    logger.info(`[Gemini] Marking credential ${this.uuid} as needs refresh. Reason: 401/400 Unauthorized in stream`);
+                    logger.info(`[Gemini] Marking credential ${this.uuid} as needs refresh. Reason: auth error status ${status} in stream`);
                     poolManager.markProviderNeedRefresh(MODEL_PROVIDER.GEMINI_CLI, {
                         uuid: this.uuid
                     });
