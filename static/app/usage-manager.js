@@ -827,7 +827,8 @@ function getProviderDisplayName(providerType) {
         'gemini-cli-oauth': 'Gemini CLI OAuth',
         'gemini-antigravity': 'Gemini Antigravity',
         'openai-codex-oauth': 'Codex OAuth',
-        'openai-qwen-oauth': 'Qwen OAuth'
+        'openai-qwen-oauth': 'Qwen OAuth',
+        'grok-custom': 'Grok Reverse'
     };
     return names[providerType] || providerType;
 }
@@ -843,7 +844,8 @@ function getProviderIcon(providerType) {
         'gemini-cli-oauth': 'fas fa-gem',
         'gemini-antigravity': 'fas fa-rocket',
         'openai-codex-oauth': 'fas fa-terminal',
-        'openai-qwen-oauth': 'fas fa-code'
+        'openai-qwen-oauth': 'fas fa-code',
+        'grok-custom': 'fas fa-brain'
     };
     return icons[providerType] || 'fas fa-server';
 }

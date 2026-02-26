@@ -11,6 +11,7 @@ import { ClaudeConverter } from './strategies/ClaudeConverter.js';
 import { GeminiConverter } from './strategies/GeminiConverter.js';
 import { OllamaConverter } from './strategies/OllamaConverter.js';
 import { CodexConverter } from './strategies/CodexConverter.js';
+import { GrokConverter } from './strategies/GrokConverter.js';
 
 /**
  * 注册所有转换器到工厂
@@ -23,6 +24,7 @@ export function registerAllConverters() {
     ConverterFactory.registerConverter(MODEL_PROTOCOL_PREFIX.GEMINI, GeminiConverter);
     ConverterFactory.registerConverter(MODEL_PROTOCOL_PREFIX.OLLAMA, OllamaConverter);
     ConverterFactory.registerConverter(MODEL_PROTOCOL_PREFIX.CODEX, CodexConverter);
+    ConverterFactory.registerConverter(MODEL_PROTOCOL_PREFIX.GROK, GrokConverter);
 }
 
 // 自动注册所有转换器

@@ -18,8 +18,10 @@ export class UsageService {
             [MODEL_PROVIDER.GEMINI_CLI]: this.getGeminiUsage.bind(this),
             [MODEL_PROVIDER.ANTIGRAVITY]: this.getAntigravityUsage.bind(this),
             [MODEL_PROVIDER.CODEX_API]: this.getCodexUsage.bind(this),
+            [MODEL_PROVIDER.GROK_CUSTOM]: this.getGrokUsage.bind(this),
         };
     }
+
 
     /**
      * 获取指定提供商的用量信息
@@ -185,7 +187,30 @@ export class UsageService {
     }
 
     /**
+     * 获取 Grok 提供商的用量信息
+     * @param {string} [uuid] - 可选的提供商实例 UUID
+     * @returns {Promise<Object>} Grok 用量信息
+     */
+    async getGrokUsage(uuid = null) {
+        const providerKey = uuid ? MODEL_PROVIDER.GROK_CUSTOM + uuid : MODEL_PROVIDER.GROK_CUSTOM;
+        const adapter = serviceInstances[providerKey];
+        
+        if (!adapter) {
+            throw new Error(`Grok 服务实例未找到: ${providerKey}`);
+        }
+        
+        // 使用适配器的 getUsageLimits 方法
+        if (typeof adapter.getUsageLimits === 'function') {
+            const rawUsage = await adapter.getUsageLimits();
+            return formatGrokUsage(rawUsage);
+        }
+        
+        throw new Error(`Grok 服务实例不支持用量查询: ${providerKey}`);
+    }
+
+    /**
      * 获取支持用量查询的提供商列表
+
      * @returns {Array<string>} 支持的提供商类型列表
      */
     getSupportedProviders() {
@@ -509,7 +534,80 @@ export function formatAntigravityUsage(usageData) {
 }
 
 /**
- * 格式化 Codex 用量信息为易读格式（映射到 Kiro 数据结构）
+ * 格式化 Grok 用量信息为易读格式（映射到 Kiro 数据结构）
+ * @param {Object} usageData - 原始用量数据
+ * @returns {Object} 格式化后的用量信息
+ */
+export function formatGrokUsage(usageData) {
+    if (!usageData) {
+        return null;
+    }
+
+    const result = {
+        // 基本信息 - 映射到 Kiro 结构
+        daysUntilReset: null,
+        nextDateReset: null,
+        
+        // 订阅信息
+        subscription: {
+            title: 'Grok Custom',
+            type: 'grok-custom',
+            upgradeCapability: null,
+            overageCapability: null
+        },
+        
+        // 用户信息
+        user: {
+            email: null,
+            userId: null
+        },
+        
+        // 用量明细
+        usageBreakdown: []
+    };
+
+    // Grok 返回的数据结构已在 core 中预处理：{ remainingTokens, remainingQueries, totalQueries, totalLimit, usedQueries, ... }
+    if (usageData.totalLimit !== undefined && usageData.usedQueries !== undefined) {
+        const item = {
+            resourceType: 'TOKEN_USAGE',
+            displayName: 'Remaining Queries',
+            displayNamePlural: 'Remaining Queries',
+            unit: 'queries',
+            currency: null,
+            
+            // 使用从 core 传出的计算好的值
+            currentUsage: usageData.usedQueries, 
+            usageLimit: usageData.totalLimit, 
+            
+            nextDateReset: null,
+            freeTrial: null,
+            bonuses: []
+        };
+        
+        result.usageBreakdown.push(item);
+    } else if (usageData.remainingTokens !== undefined) {
+        const item = {
+            resourceType: 'TOKEN_USAGE',
+            displayName: 'Remaining Tokens',
+            displayNamePlural: 'Remaining Tokens',
+            unit: 'tokens',
+            currency: null,
+            
+            currentUsage: 0, 
+            usageLimit: usageData.remainingTokens, 
+            
+            nextDateReset: null,
+            freeTrial: null,
+            bonuses: []
+        };
+        
+        result.usageBreakdown.push(item);
+    }
+
+    return result;
+}
+
+/*
  * @param {Object} usageData - 原始用量数据
  * @returns {Object} 格式化后的用量信息
  */

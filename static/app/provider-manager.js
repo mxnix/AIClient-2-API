@@ -181,8 +181,11 @@ function updateTimeDisplay() {
  */
 async function loadProviders() {
     try {
-        const data = await window.apiClient.get('/providers');
-        renderProviders(data);
+        const [providers, supportedProviders] = await Promise.all([
+            window.apiClient.get('/providers'),
+            window.apiClient.get('/providers/supported')
+        ]);
+        renderProviders(providers, supportedProviders);
     } catch (error) {
         console.error('Failed to load providers:', error);
     }
@@ -191,8 +194,9 @@ async function loadProviders() {
 /**
  * 渲染提供商列表
  * @param {Object} providers - 提供商数据
+ * @param {string[]} supportedProviders - 已注册的提供商类型列表
  */
-function renderProviders(providers) {
+function renderProviders(providers, supportedProviders = []) {
     const container = document.getElementById('providersList');
     if (!container) return;
     
@@ -206,17 +210,19 @@ function renderProviders(providers) {
     if (statsGrid) statsGrid.style.display = 'grid';
     
     // 定义所有支持的提供商配置（顺序、显示名称、是否显示）
+    // visible 现在由 supportedProviders 决定
     const providerConfigs = [
-        { id: 'forward-api', name: 'NewAPI', visible: false },
-        { id: 'gemini-cli-oauth', name: 'Gemini CLI OAuth', visible: true },
-        { id: 'gemini-antigravity', name: 'Gemini Antigravity', visible: true },
-        { id: 'openai-custom', name: 'OpenAI Custom', visible: true },
-        { id: 'claude-custom', name: 'Claude Custom', visible: true },
-        { id: 'claude-kiro-oauth', name: 'Claude Kiro OAuth', visible: true },
-        { id: 'openai-qwen-oauth', name: 'OpenAI Qwen OAuth', visible: true },
-        { id: 'openaiResponses-custom', name: 'OpenAI Responses', visible: true },
-        { id: 'openai-iflow', name: 'OpenAI iFlow', visible: true },
-        { id: 'openai-codex-oauth', name: 'OpenAI Codex OAuth', visible: true },
+        { id: 'forward-api', name: 'NewAPI', visible: supportedProviders.includes('forward-api') },
+        { id: 'gemini-cli-oauth', name: 'Gemini CLI OAuth', visible: supportedProviders.includes('gemini-cli-oauth') },
+        { id: 'gemini-antigravity', name: 'Gemini Antigravity', visible: supportedProviders.includes('gemini-antigravity') },
+        { id: 'openai-custom', name: 'OpenAI Custom', visible: supportedProviders.includes('openai-custom') },
+        { id: 'claude-custom', name: 'Claude Custom', visible: supportedProviders.includes('claude-custom') },
+        { id: 'claude-kiro-oauth', name: 'Claude Kiro OAuth', visible: supportedProviders.includes('claude-kiro-oauth') },
+        { id: 'openai-qwen-oauth', name: 'OpenAI Qwen OAuth', visible: supportedProviders.includes('openai-qwen-oauth') },
+        { id: 'openaiResponses-custom', name: 'OpenAI Responses', visible: supportedProviders.includes('openaiResponses-custom') },
+        { id: 'openai-iflow', name: 'OpenAI iFlow', visible: supportedProviders.includes('openai-iflow') },
+        { id: 'openai-codex-oauth', name: 'OpenAI Codex OAuth', visible: supportedProviders.includes('openai-codex-oauth') },
+        { id: 'grok-custom', name: 'Grok Reverse', visible: supportedProviders.includes('grok-custom') },
     ];
     
     // 提取显示的 ID 顺序

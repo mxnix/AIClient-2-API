@@ -77,6 +77,17 @@ export const PROVIDER_MAPPINGS = [
         displayName: 'OpenAI Codex OAuth',
         needsProjectId: false,
         urlKeys: ['CODEX_BASE_URL']
+    },
+    {
+        // Grok Reverse 配置
+        dirName: 'grok',
+        patterns: ['configs/grok/', '/grok/'],
+        providerType: 'grok-custom',
+        credPathKey: 'GROK_COOKIE_TOKEN',
+        defaultCheckModel: 'grok-3',
+        displayName: 'Grok Reverse',
+        needsProjectId: false,
+        urlKeys: ['GROK_BASE_URL', 'GROK_CF_CLEARANCE', 'GROK_USER_AGENT']
     }
 ];
 

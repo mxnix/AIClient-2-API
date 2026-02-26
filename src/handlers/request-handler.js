@@ -1,11 +1,12 @@
 import deepmerge from 'deepmerge';
 import logger from '../utils/logger.js';
-import { handleError } from '../utils/common.js';
+import { handleError, getClientIp } from '../utils/common.js';
 import { handleUIApiRequests, serveStaticFiles } from '../services/ui-manager.js';
 import { handleAPIRequests } from '../services/api-manager.js';
 import { getApiService, getProviderStatus } from '../services/service-manager.js';
 import { getProviderPoolManager } from '../services/service-manager.js';
 import { MODEL_PROVIDER } from '../utils/common.js';
+import { getRegisteredProviders } from '../providers/adapter.js';
 import { PROMPT_LOG_FILENAME } from '../core/config-manager.js';
 import { handleOllamaRequest, handleOllamaShow } from './ollama-handler.js';
 import { getPluginManager } from '../core/plugin-manager.js';
@@ -17,6 +18,7 @@ import { randomUUID } from 'crypto';
 function generateRequestId() {
     return randomUUID().slice(0, 8);
 }
+
 /**
  * Parse request body as JSON
  */
@@ -45,7 +47,8 @@ function parseRequestBody(req) {
 export function createRequestHandler(config, providerPoolManager) {
     return async function requestHandler(req, res) {
         // Generate unique request ID and set it in logger context
-        const requestId = generateRequestId();
+        const clientIp = getClientIp(req);
+        const requestId = `${clientIp}:${generateRequestId()}`;
         logger.setRequestContext(requestId);
 
         // Deep copy the config for each request to allow dynamic modification
@@ -141,8 +144,16 @@ export function createRequestHandler(config, providerPoolManager) {
         // Allow overriding MODEL_PROVIDER via request header
         const modelProviderHeader = req.headers['model-provider'];
         if (modelProviderHeader) {
-            currentConfig.MODEL_PROVIDER = modelProviderHeader;
-            logger.info(`[Config] MODEL_PROVIDER overridden by header to: ${currentConfig.MODEL_PROVIDER}`);
+            const registeredProviders = getRegisteredProviders();
+            if (registeredProviders.includes(modelProviderHeader)) {
+                currentConfig.MODEL_PROVIDER = modelProviderHeader;
+                logger.info(`[Config] MODEL_PROVIDER overridden by header to: ${currentConfig.MODEL_PROVIDER}`);
+            } else {
+                logger.warn(`[Config] Provider ${modelProviderHeader} in header is not available.`);
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: { message: `Provider ${modelProviderHeader} is not available.` } }));
+                return;
+            }
         }
           
         // Check if the first path segment matches a MODEL_PROVIDER and switch if it does
@@ -152,13 +163,20 @@ export function createRequestHandler(config, providerPoolManager) {
         
         if (pathSegments.length > 0 && !isOllamaPath) {
             const firstSegment = pathSegments[0];
-            const isValidProvider = Object.values(MODEL_PROVIDER).includes(firstSegment);
+            const registeredProviders = getRegisteredProviders();
+            const isValidProvider = registeredProviders.includes(firstSegment);
             if (firstSegment && isValidProvider) {
                 currentConfig.MODEL_PROVIDER = firstSegment;
                 logger.info(`[Config] MODEL_PROVIDER overridden by path segment to: ${currentConfig.MODEL_PROVIDER}`);
                 pathSegments.shift();
                 path = '/' + pathSegments.join('/');
                 requestUrl.pathname = path;
+            } else if (firstSegment && Object.values(MODEL_PROVIDER).includes(firstSegment)) {
+                // 如果在 MODEL_PROVIDER 中但没注册适配器，拦截并报错
+                logger.warn(`[Config] Provider ${firstSegment} is recognized but no adapter is registered.`);
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: { message: `Provider ${firstSegment} is not available.` } }));
+                return;
             } else if (firstSegment && !isValidProvider) {
                 logger.info(`[Config] Ignoring invalid MODEL_PROVIDER in path segment: ${firstSegment}`);
             }

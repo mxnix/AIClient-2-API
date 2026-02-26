@@ -1,11 +1,12 @@
 import { CONFIG } from '../core/config-manager.js';
 import logger from '../utils/logger.js';
 import { serviceInstances, getServiceAdapter } from '../providers/adapter.js';
-import { formatKiroUsage, formatGeminiUsage, formatAntigravityUsage, formatCodexUsage } from '../services/usage-service.js';
+import { formatKiroUsage, formatGeminiUsage, formatAntigravityUsage, formatCodexUsage, formatGrokUsage } from '../services/usage-service.js';
 import { readUsageCache, writeUsageCache, readProviderUsageCache, updateProviderUsageCache } from './usage-cache.js';
 import path from 'path';
 
-const supportedProviders = ['claude-kiro-oauth', 'gemini-cli-oauth', 'gemini-antigravity', 'openai-codex-oauth'];
+const supportedProviders = ['claude-kiro-oauth', 'gemini-cli-oauth', 'gemini-antigravity', 'openai-codex-oauth', 'grok-custom'];
+
 
 /**
  * 获取所有支持用量查询的提供商的用量信息
@@ -176,6 +177,14 @@ async function getAdapterUsage(adapter, providerType) {
         } else if (adapter.codexApiService && typeof adapter.codexApiService.getUsageLimits === 'function') {
             const rawUsage = await adapter.codexApiService.getUsageLimits();
             return formatCodexUsage(rawUsage);
+        }
+        throw new Error('This adapter does not support usage query');
+    }
+
+    if (providerType === 'grok-custom') {
+        if (typeof adapter.getUsageLimits === 'function') {
+            const rawUsage = await adapter.getUsageLimits();
+            return formatGrokUsage(rawUsage);
         }
         throw new Error('This adapter does not support usage query');
     }

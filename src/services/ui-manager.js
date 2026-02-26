@@ -123,6 +123,11 @@ export async function handleUIApiRequests(method, pathParam, req, res, currentCo
         return await providerApi.handleGetProviders(req, res, currentConfig, providerPoolManager);
     }
 
+    // Get supported provider types based on registered adapters
+    if (method === 'GET' && pathParam === '/api/providers/supported') {
+        return await providerApi.handleGetSupportedProviders(req, res);
+    }
+
     // Get specific provider type details
     const providerTypeMatch = pathParam.match(/^\/api\/providers\/([^\/]+)$/);
     if (method === 'GET' && providerTypeMatch) {

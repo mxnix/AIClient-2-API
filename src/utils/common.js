@@ -58,6 +58,7 @@ export const MODEL_PROTOCOL_PREFIX = {
     OLLAMA: 'ollama',
     CODEX: 'codex',
     FORWARD: 'forward',
+    GROK: 'grok',
 }
 
 export const MODEL_PROVIDER = {
@@ -72,6 +73,7 @@ export const MODEL_PROVIDER = {
     IFLOW_API: 'openai-iflow',
     CODEX_API: 'openai-codex-oauth',
     FORWARD_API: 'forward-api',
+    GROK_CUSTOM: 'grok-custom',
 }
 
 /**
@@ -163,6 +165,23 @@ export function formatExpiryLog(tag, expiryDate, nearMinutes) {
     });
     
     return { message, isNearExpiry };
+}
+
+/**
+ * Get client IP address from request
+ * @param {http.IncomingMessage} req - The HTTP request object.
+ * @returns {string} The client IP address.
+ */
+export function getClientIp(req) {
+    const forwarded = req.headers['x-forwarded-for'];
+    let ip = forwarded ? forwarded.split(',')[0].trim() : req.socket.remoteAddress;
+    
+    // Clean up IPv4-mapped IPv6 addresses (e.g., ::ffff:127.0.0.1 -> 127.0.0.1)
+    if (ip && ip.includes('::ffff:')) {
+        ip = ip.replace('::ffff:', '');
+    }
+    
+    return ip || 'unknown';
 }
 
 /**
@@ -314,17 +333,17 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         await handleUnifiedResponse(res, '', true);
     }
 
-    // fs.writeFile('request'+Date.now()+'.json', JSON.stringify(requestBody));
-    // The service returns a stream in its native format (toProvider).
-    const needsConversion = getProtocolPrefix(fromProvider) !== getProtocolPrefix(toProvider);
-    requestBody.model = model;
-    const nativeStream = await service.generateContentStream(model, requestBody);
-    const addEvent = getProtocolPrefix(fromProvider) === MODEL_PROTOCOL_PREFIX.CLAUDE || getProtocolPrefix(fromProvider) === MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES;
-
     let hasToolCall = false;
     let hasMessageStop = false; // 跟踪是否已经发送过结束标志（message_stop / done）
 
     try {
+        // fs.writeFile('request'+Date.now()+'.json', JSON.stringify(requestBody));
+        // The service returns a stream in its native format (toProvider).
+        const needsConversion = getProtocolPrefix(fromProvider) !== getProtocolPrefix(toProvider);
+        requestBody.model = model;
+        const nativeStream = await service.generateContentStream(model, requestBody);
+        const addEvent = getProtocolPrefix(fromProvider) === MODEL_PROTOCOL_PREFIX.CLAUDE || getProtocolPrefix(fromProvider) === MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES;
+
         for await (const nativeChunk of nativeStream) {
             // 检查客户端是否已断开连接
             if (clientDisconnected.value) {
@@ -530,7 +549,8 @@ export async function handleStreamRequest(res, service, model, requestBody, from
             try {
                 // 动态导入以避免循环依赖
                 const { getApiServiceWithFallback } = await import('../services/service-manager.js');
-                const result = await getApiServiceWithFallback(CONFIG, model);
+                // 使用 acquireSlot: true 以占用新凭证的并发插槽
+                const result = await getApiServiceWithFallback(CONFIG, model, { acquireSlot: true });
                 
                 if (result && result.service) {
                     logger.info(`[Stream Retry] Switched to new credential: ${result.uuid} (provider: ${result.actualProviderType})`);
@@ -579,6 +599,11 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         }
         responseClosed = true;
     } finally {
+        // 释放并发插槽
+        if (providerPoolManager && pooluuid) {
+            providerPoolManager.releaseSlot(toProvider, pooluuid);
+        }
+
         // 只在首次请求时移除事件监听器（避免重试时误删）
         if (!isRetry) {
             res.off('close', onClientClose);
@@ -732,7 +757,8 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
             try {
                 // 动态导入以避免循环依赖
                 const { getApiServiceWithFallback } = await import('../services/service-manager.js');
-                const result = await getApiServiceWithFallback(CONFIG, model);
+                // 使用 acquireSlot: true 以占用新凭证的并发插槽
+                const result = await getApiServiceWithFallback(CONFIG, model, { acquireSlot: true });
                 
                 if (result && result.service) {
                     logger.info(`[Unary Retry] Switched to new credential: ${result.uuid} (provider: ${result.actualProviderType})`);
@@ -771,6 +797,11 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         // 使用新方法创建符合 fromProvider 格式的错误响应
         const errorResponse = createErrorResponse(error, fromProvider);
         await handleUnifiedResponse(res, JSON.stringify(errorResponse), false);
+    } finally {
+        // 确保在请求结束或出错时释放插槽
+        if (providerPoolManager && pooluuid) {
+            providerPoolManager.releaseSlot(toProvider, pooluuid);
+        }
     }
 }
 
@@ -868,10 +899,10 @@ export async function handleContentGenerationRequest(req, res, service, endpoint
     let actualCustomName = CONFIG.customName;
 
     // 2.5. 如果使用了提供商池，根据模型重新选择提供商（支持 Fallback）
-    // 注意：这里使用 skipUsageCount: true，因为初次选择时已经增加了 usageCount
+    // 注意：这里开启 acquireSlot: true，会占用并发名额或进入队列
     if (providerPoolManager && CONFIG.providerPools && CONFIG.providerPools[CONFIG.MODEL_PROVIDER]) {
         const { getApiServiceWithFallback } = await import('../services/service-manager.js');
-        const result = await getApiServiceWithFallback(CONFIG, model);
+        const result = await getApiServiceWithFallback(CONFIG, model, { acquireSlot: true });
         
         service = result.service;
         toProvider = result.actualProviderType;

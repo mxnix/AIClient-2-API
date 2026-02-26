@@ -183,6 +183,17 @@ function getAvailableRoutes() {
             description: '结构化对话API',
             badge: 'Responses',
             badgeClass: 'responses'
+        },
+        {
+            provider: 'grok-custom',
+            name: 'Grok Reverse',
+            paths: {
+                openai: '/grok-custom/v1/chat/completions',
+                claude: '/grok-custom/v1/messages'
+            },
+            description: t('dashboard.routing.free'),
+            badge: t('dashboard.routing.free'),
+            badgeClass: 'oauth'
         }
     ];
 }
@@ -314,6 +325,27 @@ async function copyCurlExample(provider, options = {}) {
   -H "X-API-Key: YOUR_API_KEY" \\
   -d '{
     "model": "${model}",
+    "max_tokens": 1000,
+    "messages": [{"role": "user", "content": "${message}"}]
+  }'`;
+            }
+            break;
+        case 'grok-custom':
+            if (protocol === 'openai') {
+                curlCommand = `curl http://localhost:3000${path} \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -d '{
+    "model": "grok-3",
+    "messages": [{"role": "user", "content": "${message}"}],
+    "stream": true
+  }'`;
+            } else {
+                curlCommand = `curl http://localhost:3000${path} \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_API_KEY" \\
+  -d '{
+    "model": "grok-3",
     "max_tokens": 1000,
     "messages": [{"role": "user", "content": "${message}"}]
   }'`;

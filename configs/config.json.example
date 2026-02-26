@@ -13,6 +13,10 @@
     "CRON_REFRESH_TOKEN": false,
     "PROVIDER_POOLS_FILE_PATH": "configs/provider_pools.json",
     "MAX_ERROR_COUNT": 3,
+    "GROK_COOKIE_TOKEN": "your-sso-cookie-token",
+    "GROK_CF_CLEARANCE": "your-cf-clearance-cookie",
+    "GROK_USER_AGENT": "Mozilla/5.0 ...",
+    "GROK_BASE_URL": "https://grok.com",
     "providerFallbackChain": {
       "gemini-cli-oauth": ["gemini-antigravity"],
       "gemini-antigravity": ["gemini-cli-oauth"],

@@ -453,16 +453,16 @@ function renderProviderConfig(provider) {
     
     // 先渲染基础配置字段（customName、checkModelName 和 checkHealth）
     let html = '<div class="form-grid">';
-    const baseFields = ['customName', 'checkModelName', 'checkHealth'];
+    const baseFields = ['customName', 'checkModelName', 'checkHealth', 'concurrencyLimit', 'queueLimit'];
     
     baseFields.forEach(fieldKey => {
         const displayLabel = getFieldLabel(fieldKey);
         const value = provider[fieldKey];
-        const displayValue = value || '';
+        const displayValue = value !== undefined ? value : '';
         
         // 查找字段定义以获取 placeholder
         const fieldDef = fieldConfigs.find(f => f.id === fieldKey) || fieldConfigs.find(f => f.id.toUpperCase() === fieldKey.toUpperCase()) || {};
-        const placeholder = fieldDef.placeholder || (fieldKey === 'customName' ? '节点自定义名称' : (fieldKey === 'checkModelName' ? '例如: gpt-3.5-turbo' : ''));
+        const placeholder = fieldDef.placeholder || (fieldKey === 'customName' ? '节点自定义名称' : (fieldKey === 'checkModelName' ? '例如: gpt-3.5-turbo' : (fieldKey === 'concurrencyLimit' ? '最大并发, 默认0不限制' : (fieldKey === 'queueLimit' ? '最大队列, 默认0不限制' : ''))));
         
         // 如果是 customName 字段，使用普通文本输入框
         if (fieldKey === 'customName') {
@@ -687,6 +687,8 @@ function getFieldOrder(provider) {
         'openai-qwen-oauth': ['QWEN_OAUTH_CREDS_FILE_PATH', 'QWEN_BASE_URL', 'QWEN_OAUTH_BASE_URL'],
         'gemini-antigravity': ['PROJECT_ID', 'ANTIGRAVITY_OAUTH_CREDS_FILE_PATH', 'ANTIGRAVITY_BASE_URL_DAILY', 'ANTIGRAVITY_BASE_URL_AUTOPUSH'],
         'openai-iflow': ['IFLOW_OAUTH_CREDS_FILE_PATH', 'IFLOW_BASE_URL'],
+        'openai-codex-oauth': ['CODEX_OAUTH_CREDS_FILE_PATH', 'CODEX_EMAIL', 'CODEX_BASE_URL'],
+        'grok-custom': ['GROK_COOKIE_TOKEN', 'GROK_CF_CLEARANCE', 'GROK_USER_AGENT', 'GROK_BASE_URL'],
         'forward-api': ['FORWARD_API_KEY', 'FORWARD_BASE_URL', 'FORWARD_HEADER_NAME', 'FORWARD_HEADER_VALUE_PREFIX']
     };
     
@@ -707,6 +709,10 @@ function getFieldOrder(provider) {
             providerType = 'gemini-antigravity';
         } else if (provider.IFLOW_OAUTH_CREDS_FILE_PATH) {
             providerType = 'openai-iflow';
+        } else if (provider.CODEX_OAUTH_CREDS_FILE_PATH) {
+            providerType = 'openai-codex-oauth';
+        } else if (provider.GROK_COOKIE_TOKEN) {
+            providerType = 'grok-custom';
         } else if (provider.FORWARD_API_KEY) {
             providerType = 'forward-api';
         }
@@ -896,7 +902,10 @@ async function saveProvider(uuid, event) {
     
     configInputs.forEach(input => {
         const key = input.dataset.configKey;
-        const value = input.value;
+        let value = input.value;
+        if (key === 'concurrencyLimit' || key === 'queueLimit') {
+            value = parseInt(value || '0');
+        }
         providerConfig[key] = value;
     });
     
@@ -1090,6 +1099,14 @@ function showAddProviderForm(providerType) {
                     <option value="true" data-i18n="modal.provider.enabled">启用</option>
                 </select>
             </div>
+            <div class="form-group">
+                <label><span data-i18n="modal.provider.concurrencyLimit">并发限制</span> <span class="optional-mark" data-i18n="config.optional">(选填)</span></label>
+                <input type="number" id="newConcurrencyLimit" placeholder="默认0不限制">
+            </div>
+            <div class="form-group">
+                <label><span data-i18n="modal.provider.queueLimit">队列限制</span> <span class="optional-mark" data-i18n="config.optional">(选填)</span></label>
+                <input type="number" id="newQueueLimit" placeholder="默认0不限制">
+            </div>
         </div>
         <div id="dynamicConfigFields">
             <!-- 动态配置字段将在这里显示 -->
@@ -1126,8 +1143,8 @@ function addDynamicConfigFields(form, providerType) {
     // 获取该提供商类型的字段配置（已经在 utils.js 中包含了 URL 字段）
     const allFields = getProviderTypeFields(providerType);
     
-    // 过滤掉已经在 form-grid 中硬编码显示的三个基础字段，避免重复
-    const baseFields = ['customName', 'checkModelName', 'checkHealth'];
+    // 过滤掉已经在 form-grid 中硬编码显示的五个基础字段，避免重复
+    const baseFields = ['customName', 'checkModelName', 'checkHealth', 'concurrencyLimit', 'queueLimit'];
     const filteredFields = allFields.filter(f => !baseFields.some(bf => f.id.toLowerCase().includes(bf.toLowerCase())));
 
     let fields = '';
@@ -1265,11 +1282,15 @@ async function addProvider(providerType) {
     const customName = document.getElementById('newCustomName')?.value;
     const checkModelName = document.getElementById('newCheckModelName')?.value;
     const checkHealth = document.getElementById('newCheckHealth')?.value === 'true';
+    const concurrencyLimit = parseInt(document.getElementById('newConcurrencyLimit')?.value || '0');
+    const queueLimit = parseInt(document.getElementById('newQueueLimit')?.value || '0');
     
     const providerConfig = {
         customName: customName || '', // 允许为空
         checkModelName: checkModelName || '', // 允许为空
-        checkHealth
+        checkHealth,
+        concurrencyLimit,
+        queueLimit
     };
     
     // 根据提供商类型动态收集配置字段（自动匹配 utils.js 中的定义）

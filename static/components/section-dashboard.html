@@ -549,6 +549,59 @@
                     </div>
                 </div>
             </div>
+
+            <div class="routing-example-card" data-provider="grok-custom-card">
+                <div class="routing-card-header">
+                    <i class="fas fa-search"></i>
+                    <h4 data-i18n="dashboard.routing.nodeName.grok">Grok Reverse</h4>
+                    <span class="provider-badge oauth" data-i18n="dashboard.routing.free">突破限制/免费使用</span>
+                </div>
+                <div class="routing-card-content">
+                    <!-- 协议标签切换 -->
+                    <div class="protocol-tabs">
+                        <button class="protocol-tab active" data-protocol="openai" data-i18n="dashboard.routing.openai">OpenAI协议</button>
+                        <button class="protocol-tab" data-protocol="claude" data-i18n="dashboard.routing.claude">Claude协议</button>
+                    </div>
+
+                    <!-- OpenAI协议示例 -->
+                    <div class="protocol-content active" data-protocol="openai">
+                        <div class="endpoint-info">
+                            <label data-i18n="dashboard.routing.endpoint">端点路径:</label>
+                            <code class="endpoint-path">/grok-custom/v1/chat/completions</code>
+                        </div>
+                        <div class="usage-example">
+                            <label data-i18n="dashboard.routing.exampleOpenAI">使用示例 (OpenAI格式):</label>
+                            <pre><code>curl http://localhost:3000/grok-custom/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -d '{
+    "model": "grok-3",
+    "messages": [{"role": "user", "content": "你好"}],
+    "stream": true
+  }'</code></pre>
+                        </div>
+                    </div>
+
+                    <!-- Claude协议示例 -->
+                    <div class="protocol-content" data-protocol="claude">
+                        <div class="endpoint-info">
+                            <label data-i18n="dashboard.routing.endpoint">端点路径:</label>
+                            <code class="endpoint-path">/grok-custom/v1/messages</code>
+                        </div>
+                        <div class="usage-example">
+                            <label data-i18n="dashboard.routing.exampleClaude">使用示例 (Claude格式):</label>
+                            <pre><code>curl http://localhost:3000/grok-custom/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -d '{
+    "model": "grok-3",
+    "max_tokens": 4096,
+    "messages": [{"role": "user", "content": "你好"}]
+  }'</code></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="routing-tips">

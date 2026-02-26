@@ -310,13 +310,11 @@ export class CodexApiService {
         delete cleanedBody.metadata;
 
         // 生成会话缓存键
-        // 默认弱化 model 依赖，以提升同会话跨模型的缓存命中率
-        // 如果 sessionId 为 'default'，则必须加上 model 以提供基础隔离
+        // 弱化 model 依赖，以提升同会话跨模型的缓存命中率
+        // 仅当 sessionId 为 'default' 时加上 model 前缀，提供基础隔离
         let cacheKey = sessionId;
         if (sessionId === 'default') {
             cacheKey = `${model}-default`;
-        } else {
-            cacheKey = `${model}-${sessionId}`;
         }
         
         let cache = this.conversationCache.get(cacheKey);

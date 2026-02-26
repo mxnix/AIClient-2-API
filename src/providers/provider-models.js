@@ -87,7 +87,24 @@ export const PROVIDER_MODELS = {
         'gpt-5.3-codex',
         'gpt-5.3-codex-spark'
     ],
-    'forward-api': []
+    'forward-api': [],
+    'grok-custom': [
+        'grok-3',
+        'grok-3-mini',
+        'grok-3-thinking',
+        'grok-4',
+        'grok-4-mini',
+        'grok-4-thinking',
+        'grok-4-heavy',
+        'grok-4.1-mini',
+        'grok-4.1-fast',
+        'grok-4.1-expert',
+        'grok-4.1-thinking',
+        'grok-4.20-beta',
+        'grok-imagine-1.0',
+        'grok-imagine-1.0-edit',
+        'grok-imagine-1.0-video'
+    ]
 };
 
 /**

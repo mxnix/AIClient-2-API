@@ -60,6 +60,8 @@ export class OpenAIConverter extends BaseConverter {
                 return this.toOpenAIResponsesRequest(data);
             case MODEL_PROTOCOL_PREFIX.CODEX:
                 return this.toCodexRequest(data);
+            case MODEL_PROTOCOL_PREFIX.GROK:
+                return this.toGrokRequest(data);
             default:
                 throw new Error(`Unsupported target protocol: ${targetProtocol}`);
         }
@@ -78,6 +80,8 @@ export class OpenAIConverter extends BaseConverter {
                 return this.toGeminiResponse(data, model);
             case MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES:
                 return this.toOpenAIResponsesResponse(data, model);
+            case MODEL_PROTOCOL_PREFIX.GROK:
+                return this.toGrokResponse(data, model);
             default:
                 throw new Error(`Unsupported target protocol: ${targetProtocol}`);
         }
@@ -94,6 +98,8 @@ export class OpenAIConverter extends BaseConverter {
                 return this.toGeminiStreamChunk(chunk, model);
             case MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES:
                 return this.toOpenAIResponsesStreamChunk(chunk, model);
+            case MODEL_PROTOCOL_PREFIX.GROK:
+                return this.toGrokStreamChunk(chunk, model);
             default:
                 throw new Error(`Unsupported target protocol: ${targetProtocol}`);
         }
@@ -1336,42 +1342,51 @@ export class OpenAIConverter extends BaseConverter {
                 }
             }]
         };
+    }
 
-        // 添加finish_reason（如果存在）
-        if (choice.finish_reason) {
-            const finishReasonMap = {
-                'stop': 'STOP',
-                'length': 'MAX_TOKENS',
-                'tool_calls': 'STOP',
-                'content_filter': 'SAFETY'
-            };
-            result.candidates[0].finishReason = finishReasonMap[choice.finish_reason] || 'STOP';
-        }
+    // =========================================================================
+    // OpenAI -> Grok 转换
+    // =========================================================================
 
-        // 添加usage信息（如果存在）
-        if (openaiChunk.usage) {
-            result.usageMetadata = {
-                promptTokenCount: openaiChunk.usage.prompt_tokens || 0,
-                candidatesTokenCount: openaiChunk.usage.completion_tokens || 0,
-                totalTokenCount: openaiChunk.usage.total_tokens || 0,
-                cachedContentTokenCount: openaiChunk.usage.prompt_tokens_details?.cached_tokens || 0,
-                promptTokensDetails: [{
-                    modality: "TEXT",
-                    tokenCount: openaiChunk.usage.prompt_tokens || 0
-                }],
-                candidatesTokensDetails: [{
-                    modality: "TEXT",
-                    tokenCount: openaiChunk.usage.completion_tokens || 0
-                }],
-                thoughtsTokenCount: openaiChunk.usage.completion_tokens_details?.reasoning_tokens || 0
-            };
-        }
-
-        return result;
+    /**
+     * OpenAI请求 -> Grok请求
+     */
+    toGrokRequest(openaiRequest) {
+        // 我们需要 GrokConverter 来处理复杂的仿真逻辑
+        const { ConverterFactory } = (import.meta.url ? { ConverterFactory: null } : { ConverterFactory: null }); // 这是一个占位，实际会从全局获取
+        
+        // 直接返回结构化数据，由 GrokApiService.buildPayload 最终处理
+        // 这样可以保留原始的 messages, tools, tool_choice 以进行高质量仿真
+        return {
+            ...openaiRequest,
+            // 保持原始结构以便 GrokApiService 处理
+            _isConverted: true 
+        };
     }
 
     /**
-     * OpenAI请求 -> Codex请求（委托给 CodexConverter）
+     * OpenAI响应 -> Grok响应（通常不使用）
+     */
+    toGrokResponse(openaiResponse, model) {
+        return openaiResponse;
+    }
+
+    /**
+     * OpenAI流式响应 -> Grok流式响应（通常不使用）
+     */
+    toGrokStreamChunk(openaiChunk, model) {
+        return openaiChunk;
+    }
+
+    /**
+     * OpenAI模型列表 -> Grok模型列表（通常不使用）
+     */
+    toGrokModelList(openaiModels) {
+        return openaiModels;
+    }
+
+    /**
+     * 将 OpenAI 模型列表转换为 Gemini 模型列表
      */
     toCodexRequest(openaiRequest) {
         return this.codexConverter.toOpenAIRequestToCodexRequest(openaiRequest);

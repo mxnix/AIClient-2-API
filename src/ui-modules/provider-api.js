@@ -4,6 +4,7 @@ import { getRequestBody } from '../utils/common.js';
 import { getAllProviderModels, getProviderModels } from '../providers/provider-models.js';
 import { generateUUID, createProviderConfig, formatSystemPath, detectProviderFromPath, addToUsedPaths, isPathUsed, pathsEqual } from '../utils/provider-utils.js';
 import { broadcastEvent } from './event-broadcast.js';
+import { getRegisteredProviders } from '../providers/adapter.js';
 
 /**
  * 获取提供商池摘要
@@ -24,6 +25,16 @@ export async function handleGetProviders(req, res, currentConfig, providerPoolMa
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(providerPools));
+    return true;
+}
+
+/**
+ * 获取支持的提供商类型（已注册适配器的）
+ */
+export async function handleGetSupportedProviders(req, res) {
+    const supportedProviders = getRegisteredProviders();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(supportedProviders));
     return true;
 }
 

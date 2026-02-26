@@ -410,17 +410,33 @@ export class ProviderPoolManager {
      */
     _calculateNodeScore(providerStatus, now = Date.now()) {
         const config = providerStatus.config;
+        const state = providerStatus.state;
         
         // 1. 基础健康分：不健康的排最后
         if (!config.isHealthy || config.isDisabled) return 1e18;
         
+        // 检查并发限制
+        const concurrencyLimit = parseInt(config.concurrencyLimit || 0);
+        const queueLimit = parseInt(config.queueLimit || 0);
+        
+        if (concurrencyLimit > 0) {
+            if (state.activeCount >= concurrencyLimit) {
+                // 如果队列也满了，排在最后（但优于不健康节点）
+                if (queueLimit > 0 && state.waitingCount >= queueLimit) {
+                    return 1e17;
+                }
+                // 没满，但需要排队。排队数量越多，权重越大
+                return 1e15 + (state.waitingCount || 0) * 1e10;
+            }
+        }
+        
         // 2. 预热/刷新分：60秒内刷新过且使用次数极少的节点视为“新鲜”，分数极低（最高优）
         const lastHealthCheckTime = config.lastHealthCheckTime ? new Date(config.lastHealthCheckTime).getTime() : 0;
         const isFresh = lastHealthCheckTime && (now - lastHealthCheckTime < 60000); 
-        if (isFresh) return -2e18 + (config.usageCount || 0) * 10000 + (now - lastHealthCheckTime); // 极其优先
+        if (isFresh) return -2e18 + (config.usageCount || 0) * 10000 + (now - lastHealthCheckTime) + (state.activeCount * 5000); // 极其优先
  
         // 3. 权重计算逻辑：
-        // 改进点：使用 lastUsedTime + usageCount 惩罚 + selectionSequence 惩罚
+        // 改进点：使用 lastUsedTime + usageCount 惩罚 + selectionSequence 惩罚 + load 惩罚
         // selectionSequence 用于在同一毫秒内彻底打破平局
         
         const lastUsedTime = config.lastUsed ? new Date(config.lastUsed).getTime() : (now - 86400000); // 没用过的视为 24 小时前用过（更旧）
@@ -431,6 +447,7 @@ export class ProviderPoolManager {
         // - lastUsedTime 越久，分越小。
         // - usageCount 越多，分越大。
         // - lastSelectionSeq 越大（最近选过），分越大。
+        // - activeCount 越多，分越大（负载均衡）
         
         // --- 策略优化：相对序列号 ---
         // 为了防止全局自增序列号导致的“老节点排挤新节点”或“重置节点排挤未重置节点”
@@ -443,10 +460,12 @@ export class ProviderPoolManager {
         
         // usageCount * 10000: 每多用一次，权重增加 10 秒
         // cappedRelativeSeq * 1000: 序列号偏移只在 100 秒（10次使用）范围内波动
+        // activeCount * 5000: 每个活跃请求增加 5 秒权重，用于平滑负载
         const baseScore = lastUsedTime + (usageCount * 10000);
         const sequenceScore = cappedRelativeSeq * 1000;
+        const loadScore = (state.activeCount || 0) * 5000;
         
-        return baseScore + sequenceScore;
+        return baseScore + sequenceScore + loadScore;
     }
 
     /**
@@ -570,6 +589,7 @@ export class ProviderPoolManager {
      */
     initializeProviderStatus() {
         for (const providerType in this.providerPools) {
+            const oldStatus = this.providerStatus[providerType] || [];
             this.providerStatus[providerType] = [];
             this.roundRobinIndex[providerType] = 0; // Initialize round-robin index for each type
             // 只有在锁不存在时才初始化，避免在运行中被重置导致并发问题
@@ -577,6 +597,9 @@ export class ProviderPoolManager {
                 this._selectionLocks[providerType] = Promise.resolve();
             }
             this.providerPools[providerType].forEach((providerConfig) => {
+                // 尝试从旧状态中恢复活跃请求计数和队列，避免重载配置时重置并发限制
+                const existing = oldStatus.find(p => p.uuid === providerConfig.uuid);
+
                 // Ensure initial health and usage stats are present in the config
                 providerConfig.isHealthy = providerConfig.isHealthy !== undefined ? providerConfig.isHealthy : true;
                 providerConfig.isDisabled = providerConfig.isDisabled !== undefined ? providerConfig.isDisabled : false;
@@ -603,10 +626,114 @@ export class ProviderPoolManager {
                     config: providerConfig,
                     uuid: providerConfig.uuid, // Still keep uuid at the top level for easy access
                     type: providerType, // 保存 providerType 引用
+                    state: existing ? existing.state : {
+                        activeCount: 0,
+                        waitingCount: 0,
+                        queue: []
+                    }
                 });
             });
         }
         this._log('info', `Initialized provider statuses: ok (maxErrorCount: ${this.maxErrorCount})`);
+    }
+
+    /**
+     * 获取一个可用的提供商插槽，考虑并发限制和队列
+     * @param {string} providerType 
+     * @param {string} requestedModel 
+     * @param {object} options 
+     */
+    async acquireSlot(providerType, requestedModel = null, options = {}) {
+        // 使用 selectProvider 进行初次选择（评分逻辑已经包含了并发考虑）
+        const selectedConfig = await this.selectProvider(providerType, requestedModel, { ...options, skipUsageCount: true });
+        
+        if (!selectedConfig) {
+            return null;
+        }
+
+        const provider = this._findProvider(providerType, selectedConfig.uuid);
+        if (!provider) return selectedConfig;
+
+        const config = provider.config;
+        const state = provider.state;
+        const concurrencyLimit = parseInt(config.concurrencyLimit || 0);
+        const queueLimit = parseInt(config.queueLimit || 0);
+
+        // 如果没有限制，直接增加活跃计数并返回
+        if (concurrencyLimit <= 0) {
+            state.activeCount++;
+            return config;
+        }
+
+        // 检查是否在并发限制内
+        if (state.activeCount < concurrencyLimit) {
+            state.activeCount++;
+            return config;
+        }
+
+        // 超过并发限制，尝试进入队列
+        if (queueLimit > 0 && state.waitingCount < queueLimit) {
+            this._log('info', `[Concurrency] Node ${config.uuid} busy (${state.activeCount}/${concurrencyLimit}), enqueuing request (queue: ${state.waitingCount + 1}/${queueLimit})`);
+            
+            state.waitingCount++;
+            try {
+                // 等待释放信号
+                await new Promise((resolve, reject) => {
+                    // 设置较短的超时用于测试验证，或者由外部控制
+                    const timeoutMs = options.queueTimeout || 300000;
+                    const timeout = setTimeout(() => {
+                        const idx = state.queue.indexOf(handler);
+                        if (idx !== -1) {
+                            state.queue.splice(idx, 1);
+                            reject(new Error(`Queue timeout after ${timeoutMs/1000}s`));
+                        }
+                    }, timeoutMs);
+
+                    const handler = () => {
+                        clearTimeout(timeout);
+                        resolve();
+                    };
+                    state.queue.push(handler);
+                });
+            } finally {
+                state.waitingCount--;
+            }
+
+            // 获得信号后，增加活跃计数
+            state.activeCount++;
+            return config;
+        }
+
+        // 队列也满了
+        this._log('warn', `[Concurrency] Node ${config.uuid} full capacity (${state.activeCount}/${concurrencyLimit}, queue: ${state.waitingCount}/${queueLimit}), returning 429`);
+        const error = new Error('Too many requests: account concurrency limit and queue reached');
+        error.status = 429;
+        error.code = 429;
+        throw error;
+    }
+
+    /**
+     * 释放提供商插槽
+     */
+    releaseSlot(providerType, uuid) {
+        if (!providerType || !uuid) return;
+        
+        const provider = this._findProvider(providerType, uuid);
+        if (!provider) return;
+
+        const state = provider.state;
+        if (state.activeCount > 0) {
+            state.activeCount--;
+        }
+
+        // 如果队列中有等待的任务，释放下一个
+        if (state.queue && state.queue.length > 0) {
+            const next = state.queue.shift();
+            if (next) {
+                // 异步触发
+                setImmediate(next);
+            }
+        }
     }
 
     /**
@@ -724,6 +851,114 @@ export class ProviderPoolManager {
         this._log('debug', `Selected provider for ${providerType} (LRU): ${selected.config.uuid}${requestedModel ? ` for model: ${requestedModel}` : ''}${options.skipUsageCount ? ' (skip usage count)' : ''}`);
         
         return selected.config;
+    }
+
+    /**
+     * 获取一个可用的提供商插槽，支持 Fallback 机制
+     */
+    async acquireSlotWithFallback(providerType, requestedModel = null, options = {}) {
+        if (!providerType || typeof providerType !== 'string') {
+            this._log('error', `Invalid providerType: ${providerType}`);
+            return null;
+        }
+
+        const triedTypes = new Set();
+        const typesToTry = [providerType];
+        
+        const fallbackTypes = this.fallbackChain[providerType] || [];
+        if (Array.isArray(fallbackTypes)) {
+            typesToTry.push(...fallbackTypes);
+        }
+
+        for (const currentType of typesToTry) {
+            if (triedTypes.has(currentType)) continue;
+            triedTypes.add(currentType);
+
+            if (!this.providerStatus[currentType] || this.providerStatus[currentType].length === 0) {
+                continue;
+            }
+
+            if (currentType !== providerType && requestedModel) {
+                const primaryProtocol = getProtocolPrefix(providerType);
+                const fallbackProtocol = getProtocolPrefix(currentType);
+                if (primaryProtocol !== fallbackProtocol) continue;
+
+                const supportedModels = getProviderModels(currentType);
+                if (supportedModels.length > 0 && !supportedModels.includes(requestedModel)) continue;
+            }
+
+            // 尝试获取插槽
+            try {
+                const selectedConfig = await this.acquireSlot(currentType, requestedModel, options);
+                if (selectedConfig) {
+                    if (currentType !== providerType) {
+                        this._log('info', `Fallback Slot activated (Chain): ${providerType} -> ${currentType} (uuid: ${selectedConfig.uuid})`);
+                    }
+                    return {
+                        config: selectedConfig,
+                        actualProviderType: currentType,
+                        isFallback: currentType !== providerType
+                    };
+                }
+            } catch (err) {
+                if (err.status === 429) {
+                    // 如果是因为 429 (并发/队列满)，尝试下一个 Fallback
+                    this._log('info', `Type ${currentType} busy (429), trying next fallback...`);
+                    continue;
+                }
+                throw err; // 其他错误抛出
+            }
+        }
+
+        // Model Fallback Mapping
+        if (requestedModel && this.modelFallbackMapping && this.modelFallbackMapping[requestedModel]) {
+            const mapping = this.modelFallbackMapping[requestedModel];
+            const targetProviderType = mapping.targetProviderType;
+            const targetModel = mapping.targetModel;
+
+            if (targetProviderType && targetModel) {
+                if (this.providerStatus[targetProviderType] && this.providerStatus[targetProviderType].length > 0) {
+                    try {
+                        const selectedConfig = await this.acquireSlot(targetProviderType, targetModel, options);
+                        if (selectedConfig) {
+                            return {
+                                config: selectedConfig,
+                                actualProviderType: targetProviderType,
+                                isFallback: true,
+                                actualModel: targetModel
+                            };
+                        }
+                    } catch (err) {
+                        // 如果目标类型繁忙，尝试它的 fallback chain
+                        const targetFallbackTypes = this.fallbackChain[targetProviderType] || [];
+                        for (const fallbackType of targetFallbackTypes) {
+                             const targetProtocol = getProtocolPrefix(targetProviderType);
+                             const fallbackProtocol = getProtocolPrefix(fallbackType);
+                             if (targetProtocol !== fallbackProtocol) continue;
+                             
+                             const supportedModels = getProviderModels(fallbackType);
+                             if (supportedModels.length > 0 && !supportedModels.includes(targetModel)) continue;
+                             
+                             try {
+                                const fallbackSelectedConfig = await this.acquireSlot(fallbackType, targetModel, options);
+                                if (fallbackSelectedConfig) {
+                                    return {
+                                        config: fallbackSelectedConfig,
+                                        actualProviderType: fallbackType,
+                                        isFallback: true,
+                                        actualModel: targetModel
+                                    };
+                                }
+                             } catch (e) {
+                                 continue;
+                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

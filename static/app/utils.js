@@ -72,6 +72,8 @@ function getFieldLabel(key) {
         'customName': t('modal.provider.customName') + ' ' + t('config.optional'),
         'checkModelName': t('modal.provider.checkModelName') + ' ' + t('config.optional'),
         'checkHealth': t('modal.provider.healthCheckLabel'),
+        'concurrencyLimit': t('modal.provider.concurrencyLimit') + ' ' + t('config.optional'),
+        'queueLimit': t('modal.provider.queueLimit') + ' ' + t('config.optional'),
         'OPENAI_API_KEY': 'OpenAI API Key',
         'OPENAI_BASE_URL': 'OpenAI Base URL',
         'CLAUDE_API_KEY': 'Claude API Key',
@@ -83,6 +85,9 @@ function getFieldLabel(key) {
         'ANTIGRAVITY_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
         'IFLOW_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
         'CODEX_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
+        'GROK_COOKIE_TOKEN': t('modal.provider.field.ssoToken'),
+        'GROK_CF_CLEARANCE': t('modal.provider.field.cfClearance'),
+        'GROK_USER_AGENT': t('modal.provider.field.userAgent'),
         'GEMINI_BASE_URL': 'Gemini Base URL',
         'KIRO_BASE_URL': t('modal.provider.field.baseUrl'),
         'KIRO_REFRESH_URL': t('modal.provider.field.refreshUrl'),
@@ -91,7 +96,9 @@ function getFieldLabel(key) {
         'QWEN_OAUTH_BASE_URL': t('modal.provider.field.oauthBaseUrl'),
         'ANTIGRAVITY_BASE_URL_DAILY': t('modal.provider.field.dailyBaseUrl'),
         'ANTIGRAVITY_BASE_URL_AUTOPUSH': t('modal.provider.field.autopushBaseUrl'),
-        'IFLOW_BASE_URL': 'iFlow Base URL',
+        'IFLOW_BASE_URL': t('modal.provider.field.iflowBaseUrl'),
+        'CODEX_BASE_URL': t('modal.provider.field.codexBaseUrl'),
+        'GROK_BASE_URL': t('modal.provider.field.grokBaseUrl'),
         'FORWARD_API_KEY': 'Forward API Key',
         'FORWARD_BASE_URL': 'Forward Base URL',
         'FORWARD_HEADER_NAME': t('modal.provider.field.headerName'),
@@ -272,9 +279,61 @@ function getProviderTypeFields(providerType) {
             },
             {
                 id: 'CODEX_BASE_URL',
-                label: `Codex Base URL <span class="optional-tag">${t('config.optional')}</span>`,
+                label: `${t('modal.provider.field.codexBaseUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'https://api.openai.com/v1/codex'
+            }
+        ],
+        'grok-custom': [
+            {
+                id: 'GROK_COOKIE_TOKEN',
+                label: t('modal.provider.field.ssoToken'),
+                type: 'password',
+                placeholder: 'sso cookie token'
+            },
+            {
+                id: 'GROK_CF_CLEARANCE',
+                label: t('modal.provider.field.cfClearance'),
+                type: 'text',
+                placeholder: 'cf_clearance cookie value'
+            },
+            {
+                id: 'GROK_USER_AGENT',
+                label: t('modal.provider.field.userAgent'),
+                type: 'text',
+                placeholder: 'Mozilla/5.0 ...'
+            },
+            {
+                id: 'GROK_BASE_URL',
+                label: `${t('modal.provider.field.grokBaseUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'text',
+                placeholder: 'https://grok.com'
+            }
+        ],
+        'grok-custom': [
+            {
+                id: 'GROK_COOKIE_TOKEN',
+                label: t('modal.provider.field.ssoToken'),
+                type: 'password',
+                placeholder: 'sso cookie token'
+            },
+            {
+                id: 'GROK_CF_CLEARANCE',
+                label: t('modal.provider.field.cfClearance'),
+                type: 'text',
+                placeholder: 'cf_clearance cookie value'
+            },
+            {
+                id: 'GROK_USER_AGENT',
+                label: t('modal.provider.field.userAgent'),
+                type: 'text',
+                placeholder: 'Mozilla/5.0 ...'
+            },
+            {
+                id: 'GROK_BASE_URL',
+                label: `Grok Base URL <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'text',
+                placeholder: 'https://grok.com'
             }
         ],
         'forward-api': [

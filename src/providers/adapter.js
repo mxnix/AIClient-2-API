@@ -8,8 +8,30 @@ import { QwenApiService } from './openai/qwen-core.js';
 import { IFlowApiService } from './openai/iflow-core.js';
 import { CodexApiService } from './openai/codex-core.js';
 import { ForwardApiService } from './forward/forward-core.js';
+import { GrokApiService } from './grok/grok-core.js';
 import { MODEL_PROVIDER } from '../utils/common.js';
 import logger from '../utils/logger.js';
+
+// 适配器注册表
+const adapterRegistry = new Map();
+
+/**
+ * 注册服务适配器
+ * @param {string} provider - 提供商名称 (来自 MODEL_PROVIDER)
+ * @param {typeof ApiServiceAdapter} adapterClass - 适配器类
+ */
+export function registerAdapter(provider, adapterClass) {
+    logger.info(`[Adapter] Registering adapter for provider: ${provider}`);
+    adapterRegistry.set(provider, adapterClass);
+}
+
+/**
+ * 获取所有已注册的提供商
+ * @returns {string[]} 已注册的提供商名称列表
+ */
+export function getRegisteredProviders() {
+    return Array.from(adapterRegistry.keys());
+}
 
 // 定义AI服务适配器接口
 // 所有的服务适配器都应该实现这些方法
@@ -614,6 +636,71 @@ export class ForwardApiServiceAdapter extends ApiServiceAdapter {
     }
 }
 
+// Grok API 服务适配器
+export class GrokApiServiceAdapter extends ApiServiceAdapter {
+    constructor(config) {
+        super();
+        this.grokApiService = new GrokApiService(config);
+    }
+
+    async generateContent(model, requestBody) {
+        if (!this.grokApiService.isInitialized) {
+            await this.grokApiService.initialize();
+        }
+        return this.grokApiService.generateContent(model, requestBody);
+    }
+
+    async *generateContentStream(model, requestBody) {
+        if (!this.grokApiService.isInitialized) {
+            await this.grokApiService.initialize();
+        }
+        yield* this.grokApiService.generateContentStream(model, requestBody);
+    }
+
+    async listModels() {
+        if (!this.grokApiService.isInitialized) {
+            await this.grokApiService.initialize();
+        }
+        return this.grokApiService.listModels();
+    }
+
+    async refreshToken() {
+        return this.grokApiService.refreshToken();
+    }
+
+    async forceRefreshToken() {
+        return this.grokApiService.refreshToken();
+    }
+
+    isExpiryDateNear() {
+        return this.grokApiService.isExpiryDateNear();
+    }
+
+    /**
+     * 获取用量限制信息
+     * @returns {Promise<Object>} 用量限制信息
+     */
+    async getUsageLimits() {
+        if (!this.grokApiService.isInitialized) {
+            await this.grokApiService.initialize();
+        }
+        return this.grokApiService.getUsageLimits();
+    }
+}
+
+// 注册所有内置适配器
+registerAdapter(MODEL_PROVIDER.OPENAI_CUSTOM, OpenAIApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.OPENAI_CUSTOM_RESPONSES, OpenAIResponsesApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.GEMINI_CLI, GeminiApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.ANTIGRAVITY, AntigravityApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.CLAUDE_CUSTOM, ClaudeApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.KIRO_API, KiroApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.QWEN_API, QwenApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.IFLOW_API, IFlowApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.CODEX_API, CodexApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.GROK_CUSTOM, GrokApiServiceAdapter);
+// registerAdapter(MODEL_PROVIDER.FORWARD_API, ForwardApiServiceAdapter);
+
 // 用于存储服务适配器单例的映射
 export const serviceInstances = {};
 
@@ -623,40 +710,13 @@ export function getServiceAdapter(config) {
     logger.info(`[Adapter] getServiceAdapter, provider: ${config.MODEL_PROVIDER}, uuid: ${config.uuid}${customNameDisplay}`);
     const provider = config.MODEL_PROVIDER;
     const providerKey = config.uuid ? provider + config.uuid : provider;
+    
     if (!serviceInstances[providerKey]) {
-        switch (provider) {
-            case MODEL_PROVIDER.OPENAI_CUSTOM:
-                serviceInstances[providerKey] = new OpenAIApiServiceAdapter(config);
-                break;
-            case MODEL_PROVIDER.OPENAI_CUSTOM_RESPONSES:
-                serviceInstances[providerKey] = new OpenAIResponsesApiServiceAdapter(config);
-                break;
-            case MODEL_PROVIDER.GEMINI_CLI:
-                serviceInstances[providerKey] = new GeminiApiServiceAdapter(config);
-                break;
-            case MODEL_PROVIDER.ANTIGRAVITY:
-                serviceInstances[providerKey] = new AntigravityApiServiceAdapter(config);
-                break;
-            case MODEL_PROVIDER.CLAUDE_CUSTOM:
-                serviceInstances[providerKey] = new ClaudeApiServiceAdapter(config);
-                break;
-            case MODEL_PROVIDER.KIRO_API:
-                serviceInstances[providerKey] = new KiroApiServiceAdapter(config);
-                break;
-            case MODEL_PROVIDER.QWEN_API:
-                serviceInstances[providerKey] = new QwenApiServiceAdapter(config);
-                break;
-            case MODEL_PROVIDER.IFLOW_API:
-                serviceInstances[providerKey] = new IFlowApiServiceAdapter(config);
-                break;
-            case MODEL_PROVIDER.CODEX_API:
-                serviceInstances[providerKey] = new CodexApiServiceAdapter(config);
-                break;
-            case MODEL_PROVIDER.FORWARD_API:
-                serviceInstances[providerKey] = new ForwardApiServiceAdapter(config);
-                break;
-            default:
-                throw new Error(`Unsupported model provider: ${provider}`);
+        const AdapterClass = adapterRegistry.get(provider);
+        if (AdapterClass) {
+            serviceInstances[providerKey] = new AdapterClass(config);
+        } else {
+            throw new Error(`Unsupported model provider: ${provider}`);
         }
     }
     return serviceInstances[providerKey];
