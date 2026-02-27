@@ -2,6 +2,7 @@ import axios from 'axios';
 import logger from '../../utils/logger.js';
 import * as http from 'http';
 import * as https from 'https';
+import * as tls from 'tls';
 import { v4 as uuidv4 } from 'uuid';
 import { API_ACTIONS, isRetryableNetworkError } from '../../utils/common.js';
 import { getProviderModels } from '../provider-models.js';
@@ -12,18 +13,66 @@ import { ConverterFactory } from '../../converters/ConverterFactory.js';
 import * as readline from 'readline';
 import { getProviderPoolManager } from '../../services/service-manager.js';
 
-// 配置 HTTP/HTTPS agent 限制连接池大小
+// Chrome 136 TLS cipher suites (精确匹配 Chrome 的 ClientHello 顺序)
+// 参考: https://tls.peet.ws/api/all (Chrome 136 fingerprint)
+const CHROME_CIPHERS = [
+    'TLS_AES_128_GCM_SHA256',
+    'TLS_AES_256_GCM_SHA384',
+    'TLS_CHACHA20_POLY1305_SHA256',
+    'ECDHE-ECDSA-AES128-GCM-SHA256',
+    'ECDHE-RSA-AES128-GCM-SHA256',
+    'ECDHE-ECDSA-AES256-GCM-SHA384',
+    'ECDHE-RSA-AES256-GCM-SHA384',
+    'ECDHE-ECDSA-CHACHA20-POLY1305',
+    'ECDHE-RSA-CHACHA20-POLY1305',
+    'ECDHE-RSA-AES128-SHA',
+    'ECDHE-RSA-AES256-SHA',
+    'AES128-GCM-SHA256',
+    'AES256-GCM-SHA384',
+    'AES128-SHA',
+    'AES256-SHA',
+].join(':');
+
+// Chrome 签名算法 (匹配 Chrome 的 signature_algorithms 扩展)
+const CHROME_SIGALGS = [
+    'ecdsa_secp256r1_sha256',
+    'rsa_pss_rsae_sha256',
+    'rsa_pkcs1_sha256',
+    'ecdsa_secp384r1_sha384',
+    'rsa_pss_rsae_sha384',
+    'rsa_pkcs1_sha384',
+    'rsa_pss_rsae_sha512',
+    'rsa_pkcs1_sha512',
+].join(':');
+
+// 配置 HTTP Agent
 const httpAgent = new http.Agent({
     keepAlive: true,
     maxSockets: 100,
     maxFreeSockets: 5,
     timeout: 120000,
 });
+
+// 配置 HTTPS Agent — 模拟 Chrome 136 TLS 指纹
 const httpsAgent = new https.Agent({
     keepAlive: true,
     maxSockets: 100,
     maxFreeSockets: 5,
     timeout: 120000,
+    // TLS 指纹伪装
+    ciphers: CHROME_CIPHERS,
+    sigalgs: CHROME_SIGALGS,
+    minVersion: 'TLSv1.2',
+    maxVersion: 'TLSv1.3',
+    // axios 仅支持 HTTP/1.1，不能协商 h2（否则服务端返回 H2 帧会解析失败）
+    // 注意：真实 Chrome 会协商 h2，但 Node.js http 模块不支持
+    ALPNProtocols: ['http/1.1'],
+    // Chrome 支持的 EC 曲线
+    ecdhCurve: 'X25519:P-256:P-384',
+    // 允许不安全的旧版协商 (Chrome 也允许)
+    honorCipherOrder: false,
+    // 启用 session ticket (Chrome 默认行为)
+    sessionTimeout: 300,
 });
 
 const DEFAULT_GROK_ENDPOINT = 'https://grok.com/rest/app-chat/conversations/new';
@@ -53,7 +102,7 @@ export class GrokApiService {
         this.uuid = config.uuid; // 存储 UUID 以便后续调用账号池方法
         this.token = config.GROK_COOKIE_TOKEN;
         this.cfClearance = config.GROK_CF_CLEARANCE;
-        this.userAgent = config.GROK_USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+        this.userAgent = config.GROK_USER_AGENT || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
         this.baseUrl = config.GROK_BASE_URL || 'https://grok.com';
         this.chatApi = `${this.baseUrl}/rest/app-chat/conversations/new`;
         this.isInitialized = false;
@@ -68,7 +117,7 @@ export class GrokApiService {
             logger.warn('[Grok] GROK_COOKIE_TOKEN is missing. Requests will fail if authorization is required.');
         }
         if (!this.cfClearance) {
-            logger.warn('[Grok] GROK_CF_CLEARANCE is missing. This might cause Cloudflare challenges.');
+            logger.debug('[Grok] GROK_CF_CLEARANCE not set. TLS/header fingerprinting should bypass Cloudflare without it.');
         }
         
         // Initial usage sync
@@ -120,7 +169,6 @@ export class GrokApiService {
         try {
             const response = await axios(axiosConfig);
             const data = response.data;
-            console.log("111111111111111111111111111", JSON.stringify(data))
             
             let remaining = data.remainingTokens;
             if (remaining === undefined) {
@@ -176,8 +224,26 @@ export class GrokApiService {
      * Generate Statsig ID (StatsigGenerator)
      */
     genStatsigId() {
-        // Static Statsig ID from  code
-        return "ZTpUeXBlRXJyb3I6IENhbm5vdCByZWFkIHByb3BlcnRpZXMgb2YgdW5kZWZpbmVkIChyZWFkaW5nICdjaGlsZE5vZGVzJyk=";
+        const randomString = (len, alphanumeric = false) => {
+            const chars = alphanumeric
+                ? 'abcdefghijklmnopqrstuvwxyz0123456789'
+                : 'abcdefghijklmnopqrstuvwxyz';
+            let result = '';
+            for (let i = 0; i < len; i++) {
+                result += chars[Math.floor(Math.random() * chars.length)];
+            }
+            return result;
+        };
+
+        let msg;
+        if (Math.random() < 0.5) {
+            const rand = randomString(5, true);
+            msg = `e:TypeError: Cannot read properties of null (reading 'children['${rand}']')`;
+        } else {
+            const rand = randomString(10);
+            msg = `e:TypeError: Cannot read properties of undefined (reading '${rand}')`;
+        }
+        return Buffer.from(msg).toString('base64');
     }
 
     buildHeaders() {
@@ -191,44 +257,45 @@ export class GrokApiService {
             cookie.push(`cf_clearance=${this.cfClearance}`);
         }
 
+        // Extract browser version and platform from UA for consistent fingerprinting
+        const ua = this.userAgent;
+        let brand = 'Google Chrome';
+        if (ua.includes('Edg/')) brand = 'Microsoft Edge';
+        const versionMatch = ua.match(/(?:Chrome|Chromium|Edg)\/(\d+)/);
+        const version = versionMatch ? versionMatch[1] : '136';
+
+        let platform = 'macOS';
+        if (ua.includes('Windows')) platform = 'Windows';
+        else if (ua.includes('Android')) platform = 'Android';
+        else if (ua.includes('iPhone') || ua.includes('iPad')) platform = 'iOS';
+        else if (ua.includes('Linux') && !ua.includes('Android')) platform = 'Linux';
+
+        const isMobile = ua.toLowerCase().includes('mobile');
+
         const headers = {
             'accept': '*/*',
-            'accept-encoding': 'gzip, deflate, br',
-            'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'accept-language': 'zh-CN,zh;q=0.9',
             'baggage': 'sentry-environment=production,sentry-release=d6add6fb0460641fd482d767a335ef72b9b6abb8,sentry-public_key=b311e0f2690c81f25e2c4cf6d4f7ce1c',
+            'cache-control': 'no-cache',
             'content-type': 'application/json',
             'cookie': cookie.join('; '),
             'origin': this.baseUrl,
+            'pragma': 'no-cache',
             'priority': 'u=1, i',
             'referer': `${this.baseUrl}/`,
+            'sec-ch-ua': `"${brand}";v="${version}", "Chromium";v="${version}", "Not(A:Brand";v="24"`,
+            'sec-ch-ua-arch': platform === 'macOS' ? 'arm' : 'x86',
+            'sec-ch-ua-bitness': '64',
+            'sec-ch-ua-mobile': isMobile ? '?1' : '?0',
+            'sec-ch-ua-model': '',
+            'sec-ch-ua-platform': `"${platform}"`,
             'sec-fetch-dest': 'empty',
             'sec-fetch-mode': 'cors',
             'sec-fetch-site': 'same-origin',
-            'user-agent': this.userAgent,
+            'user-agent': ua,
             'x-statsig-id': this.genStatsigId(),
             'x-xai-request-id': uuidv4()
         };
-
-        // Sync Sec-Ch-Ua logic
-        if (this.userAgent && (this.userAgent.includes("Chrome/") || this.userAgent.includes("Chromium/") || this.userAgent.includes("Edg/"))) {
-            let brand = "Google Chrome";
-            if (this.userAgent.includes("Edg/")) brand = "Microsoft Edge";
-            
-            const versionMatch = this.userAgent.match(/(?:Chrome|Chromium|Edg)\/(\d+)/);
-            const version = versionMatch ? versionMatch[1] : "133";
-            
-            headers['sec-ch-ua'] = `"${brand}";v="${version}", "Chromium";v="${version}", "Not(A:Brand";v="24"`;
-            headers['sec-ch-ua-mobile'] = this.userAgent.toLowerCase().includes("mobile") ? '?1' : '?0';
-            
-            // Platform detection
-            let platform = "Windows";
-            if (this.userAgent.includes("Mac OS X")) platform = "macOS";
-            else if (this.userAgent.includes("Android")) platform = "Android";
-            else if (this.userAgent.includes("iPhone") || this.userAgent.includes("iPad")) platform = "iOS";
-            else if (this.userAgent.includes("Linux")) platform = "Linux";
-            
-            headers['sec-ch-ua-platform'] = `"${platform}"`;
-        }
 
         return headers;
     }

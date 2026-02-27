@@ -22,6 +22,8 @@ class Logger {
         this.logStream = null;
         this.currentRequestId = null; // 当前请求ID
         this.requestContext = new Map(); // 存储请求上下文
+        this.contextTTL = 5 * 60 * 1000; // 请求上下文 TTL：5 分钟
+        this._contextCleanupTimer = null;
         this.levels = {
             debug: 0,
             info: 1,
@@ -87,7 +89,8 @@ class Logger {
             requestId = randomUUID().substring(0, 8);
         }
         this.currentRequestId = requestId;
-        this.requestContext.set(requestId, context);
+        this.requestContext.set(requestId, { ...context, _createdAt: Date.now() });
+        this._ensureContextCleanup();
         return requestId;
     }
 
@@ -118,6 +121,36 @@ class Logger {
             this.requestContext.delete(requestId);
         }
         this.currentRequestId = null;
+    }
+
+    /**
+     * 启动定期清理过期请求上下文的定时器（防止内存泄漏）
+     * 每 60 秒扫描一次，清除超过 contextTTL 的条目
+     */
+    _ensureContextCleanup() {
+        if (this._contextCleanupTimer) return;
+        this._contextCleanupTimer = setInterval(() => {
+            const now = Date.now();
+            let cleaned = 0;
+            for (const [id, ctx] of this.requestContext) {
+                if (now - (ctx._createdAt || 0) > this.contextTTL) {
+                    this.requestContext.delete(id);
+                    cleaned++;
+                }
+            }
+            if (cleaned > 0) {
+                this.log('warn', [`[Logger] Cleaned ${cleaned} stale request context(s) (TTL: ${this.contextTTL}ms)`]);
+            }
+            // 当 Map 为空时停止定时器
+            if (this.requestContext.size === 0) {
+                clearInterval(this._contextCleanupTimer);
+                this._contextCleanupTimer = null;
+            }
+        }, 60_000);
+        // 不阻止进程退出
+        if (this._contextCleanupTimer.unref) {
+            this._contextCleanupTimer.unref();
+        }
     }
 
     /**
@@ -310,6 +343,10 @@ class Logger {
      * 关闭日志流
      */
     close() {
+        if (this._contextCleanupTimer) {
+            clearInterval(this._contextCleanupTimer);
+            this._contextCleanupTimer = null;
+        }
         if (this.logStream && !this.logStream.destroyed) {
             this.logStream.end();
             this.logStream = null;

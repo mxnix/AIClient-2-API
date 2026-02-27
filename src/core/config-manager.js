@@ -95,102 +95,52 @@ export async function initializeConfig(args = process.argv.slice(2), configFileP
         logger.info('[Config] Using default configuration.');
     }
 
-    // Parse command-line arguments
+    // CLI argument definitions: { flag, configKey, type, validValues? }
+    // type: 'string' | 'int' | 'bool' | 'enum'
+    const cliArgDefs = [
+        { flag: '--api-key',              configKey: 'REQUIRED_API_KEY',       type: 'string' },
+        { flag: '--log-prompts',          configKey: 'PROMPT_LOG_MODE',        type: 'enum', validValues: ['console', 'file'] },
+        { flag: '--port',                 configKey: 'SERVER_PORT',            type: 'int' },
+        { flag: '--model-provider',       configKey: 'MODEL_PROVIDER',         type: 'string' },
+        { flag: '--system-prompt-file',   configKey: 'SYSTEM_PROMPT_FILE_PATH', type: 'string' },
+        { flag: '--system-prompt-mode',   configKey: 'SYSTEM_PROMPT_MODE',     type: 'enum', validValues: ['overwrite', 'append'] },
+        { flag: '--host',                 configKey: 'HOST',                   type: 'string' },
+        { flag: '--prompt-log-base-name', configKey: 'PROMPT_LOG_BASE_NAME',   type: 'string' },
+        { flag: '--cron-near-minutes',    configKey: 'CRON_NEAR_MINUTES',      type: 'int' },
+        { flag: '--cron-refresh-token',   configKey: 'CRON_REFRESH_TOKEN',     type: 'bool' },
+        { flag: '--provider-pools-file',  configKey: 'PROVIDER_POOLS_FILE_PATH', type: 'string' },
+        { flag: '--max-error-count',      configKey: 'MAX_ERROR_COUNT',        type: 'int' },
+    ];
+
+    // Parse command-line arguments using definitions
+    const flagMap = new Map(cliArgDefs.map(def => [def.flag, def]));
     for (let i = 0; i < args.length; i++) {
-        if (args[i] === '--api-key') {
-            if (i + 1 < args.length) {
-                currentConfig.REQUIRED_API_KEY = args[i + 1];
-                i++;
-            } else {
-                logger.warn(`[Config Warning] --api-key flag requires a value.`);
-            }
-        } else if (args[i] === '--log-prompts') {
-            if (i + 1 < args.length) {
-                const mode = args[i + 1];
-                if (mode === 'console' || mode === 'file') {
-                    currentConfig.PROMPT_LOG_MODE = mode;
+        const def = flagMap.get(args[i]);
+        if (!def) continue;
+
+        if (i + 1 >= args.length) {
+            logger.warn(`[Config Warning] ${def.flag} flag requires a value.`);
+            continue;
+        }
+
+        const rawValue = args[++i];
+        switch (def.type) {
+            case 'string':
+                currentConfig[def.configKey] = rawValue;
+                break;
+            case 'int':
+                currentConfig[def.configKey] = parseInt(rawValue, 10);
+                break;
+            case 'bool':
+                currentConfig[def.configKey] = rawValue.toLowerCase() === 'true';
+                break;
+            case 'enum':
+                if (def.validValues.includes(rawValue)) {
+                    currentConfig[def.configKey] = rawValue;
                 } else {
-                    logger.warn(`[Config Warning] Invalid mode for --log-prompts. Expected 'console' or 'file'. Prompt logging is disabled.`);
+                    logger.warn(`[Config Warning] Invalid value for ${def.flag}. Expected one of: ${def.validValues.join(', ')}.`);
                 }
-                i++;
-            } else {
-                logger.warn(`[Config Warning] --log-prompts flag requires a value.`);
-            }
-        } else if (args[i] === '--port') {
-            if (i + 1 < args.length) {
-                currentConfig.SERVER_PORT = parseInt(args[i + 1], 10);
-                i++;
-            } else {
-                logger.warn(`[Config Warning] --port flag requires a value.`);
-            }
-        } else if (args[i] === '--model-provider') {
-            if (i + 1 < args.length) {
-                currentConfig.MODEL_PROVIDER = args[i + 1];
-                i++;
-            } else {
-                logger.warn(`[Config Warning] --model-provider flag requires a value.`);
-            }
-        } else if (args[i] === '--system-prompt-file') {
-            if (i + 1 < args.length) {
-                currentConfig.SYSTEM_PROMPT_FILE_PATH = args[i + 1];
-                i++;
-            } else {
-                logger.warn(`[Config Warning] --system-prompt-file flag requires a value.`);
-            }
-        } else if (args[i] === '--system-prompt-mode') {
-            if (i + 1 < args.length) {
-                const mode = args[i + 1];
-                if (mode === 'overwrite' || mode === 'append') {
-                    currentConfig.SYSTEM_PROMPT_MODE = mode;
-                } else {
-                    logger.warn(`[Config Warning] Invalid mode for --system-prompt-mode. Expected 'overwrite' or 'append'. Using default 'overwrite'.`);
-                }
-                i++;
-            } else {
-                logger.warn(`[Config Warning] --system-prompt-mode flag requires a value.`);
-            }
-        } else if (args[i] === '--host') {
-            if (i + 1 < args.length) {
-                currentConfig.HOST = args[i + 1];
-                i++;
-            } else {
-                logger.warn(`[Config Warning] --host flag requires a value.`);
-            }
-        } else if (args[i] === '--prompt-log-base-name') {
-            if (i + 1 < args.length) {
-                currentConfig.PROMPT_LOG_BASE_NAME = args[i + 1];
-                i++;
-            } else {
-                logger.warn(`[Config Warning] --prompt-log-base-name flag requires a value.`);
-            }
-        } else if (args[i] === '--cron-near-minutes') {
-            if (i + 1 < args.length) {
-                currentConfig.CRON_NEAR_MINUTES = parseInt(args[i + 1], 10);
-                i++;
-            } else {
-                logger.warn(`[Config Warning] --cron-near-minutes flag requires a value.`);
-            }
-        } else if (args[i] === '--cron-refresh-token') {
-            if (i + 1 < args.length) {
-                currentConfig.CRON_REFRESH_TOKEN = args[i + 1].toLowerCase() === 'true';
-                i++;
-            } else {
-                logger.warn(`[Config Warning] --cron-refresh-token flag requires a value.`);
-            }
-        } else if (args[i] === '--provider-pools-file') {
-            if (i + 1 < args.length) {
-                currentConfig.PROVIDER_POOLS_FILE_PATH = args[i + 1];
-                i++;
-            } else {
-                logger.warn(`[Config Warning] --provider-pools-file flag requires a value.`);
-            }
-        } else if (args[i] === '--max-error-count') {
-            if (i + 1 < args.length) {
-                currentConfig.MAX_ERROR_COUNT = parseInt(args[i + 1], 10);
-                i++;
-            } else {
-                logger.warn(`[Config Warning] --max-error-count flag requires a value.`);
-            }
+                break;
         }
     }
 

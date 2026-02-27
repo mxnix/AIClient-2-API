@@ -1,4 +1,5 @@
 @echo off
+rem Ensure the script uses Windows CRLF line endings and UTF-8 encoding
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 
