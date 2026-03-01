@@ -676,7 +676,17 @@ export class ClaudeConverter extends BaseConverter {
      * 处理Claude内容到OpenAI格式
      */
     processClaudeContentToOpenAIContent(content) {
-        if (!content || !Array.isArray(content)) return [];
+        if (!content) return [];
+        
+        // 如果是字符串，直接转换为 OpenAI 的文本块格式
+        if (typeof content === 'string') {
+            return [{
+                type: 'text',
+                text: content
+            }];
+        }
+
+        if (!Array.isArray(content)) return [];
         
         const contentArray = [];
         
@@ -735,7 +745,11 @@ export class ClaudeConverter extends BaseConverter {
      * 处理Claude响应内容
      */
     processClaudeResponseContent(content) {
-        if (!content || !Array.isArray(content)) return '';
+        if (!content) return '';
+        
+        if (typeof content === 'string') return content;
+
+        if (!Array.isArray(content)) return '';
         
         const contentArray = [];
         

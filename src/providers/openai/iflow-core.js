@@ -437,16 +437,25 @@ function ensureToolsArray(body) {
  * @returns {Object} - 处理后的请求体
  */
 function preprocessRequestBody(body, model) {
+    // 确保模型名称有效，如果不存在则使用默认模型
+    let targetModel = model;
+    if (Array.isArray(IFLOW_MODELS) && IFLOW_MODELS.length > 0) {
+        if (!IFLOW_MODELS.includes(model)) {
+            logger.warn(`[iFlow] Model "${model}" not found in IFLOW_MODELS, defaulting to "${IFLOW_MODELS[0]}"`);
+            targetModel = IFLOW_MODELS[0];
+        }
+    }
+
     let processedBody = { ...body };
     
     // 确保模型名称正确
-    processedBody.model = model;
+    processedBody.model = targetModel;
     
     // 应用 iFlow thinking 配置
-    processedBody = applyIFlowThinkingConfig(processedBody, model);
+    processedBody = applyIFlowThinkingConfig(processedBody, targetModel);
     
     // 保留 reasoning_content
-    processedBody = preserveReasoningContentInMessages(processedBody, model);
+    processedBody = preserveReasoningContentInMessages(processedBody, targetModel);
     
     // 确保 tools 数组
     processedBody = ensureToolsArray(processedBody);

@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { API_ACTIONS, isRetryableNetworkError } from '../../utils/common.js';
 import { getProviderModels } from '../provider-models.js';
 import { configureAxiosProxy } from '../../utils/proxy-utils.js';
+import { getTLSSidecar } from '../../utils/tls-sidecar.js';
 import { MODEL_PROVIDER } from '../../utils/common.js';
 import { GrokConverter } from '../../converters/strategies/GrokConverter.js';
 import { ConverterFactory } from '../../converters/ConverterFactory.js';
@@ -110,6 +111,23 @@ export class GrokApiService {
         this.lastSyncAt = null;
     }
 
+    /**
+     * 如果 TLS sidecar 可用，将 axios 请求改为通过 sidecar 转发
+     * sidecar 不可用时保持原有 https.Agent TLS 配置
+     */
+    _applySidecar(axiosConfig) {
+        const sidecar = getTLSSidecar();
+        if (sidecar.isReady()) {
+            // 获取上游代理 URL（如果有）
+            const proxyUrl = this.config.PROXY_URL && 
+                this.config.PROXY_ENABLED_PROVIDERS?.includes(MODEL_PROVIDER.GROK_CUSTOM)
+                ? this.config.PROXY_URL : null;
+            sidecar.wrapAxiosConfig(axiosConfig, proxyUrl);
+            logger.debug('[Grok] Request routed through TLS sidecar');
+        }
+        return axiosConfig;
+    }
+
     async initialize() {
         if (this.isInitialized) return;
         logger.info('[Grok] Initializing Grok API Service...');
@@ -165,6 +183,7 @@ export class GrokApiService {
         };
 
         configureAxiosProxy(axiosConfig, this.config, MODEL_PROVIDER.GROK_CUSTOM);
+        this._applySidecar(axiosConfig);
 
         try {
             const response = await axios(axiosConfig);
@@ -542,6 +561,7 @@ export class GrokApiService {
         };
 
         configureAxiosProxy(axiosConfig, this.config, MODEL_PROVIDER.GROK_CUSTOM);
+        this._applySidecar(axiosConfig);
 
         try {
             const response = await axios(axiosConfig);
@@ -604,6 +624,7 @@ export class GrokApiService {
         };
 
         configureAxiosProxy(axiosConfig, this.config, MODEL_PROVIDER.GROK_CUSTOM);
+        this._applySidecar(axiosConfig);
 
         try {
             const response = await axios(axiosConfig);

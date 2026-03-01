@@ -177,6 +177,12 @@ async function loadConfiguration() {
         if (logMaxFileSizeEl) logMaxFileSizeEl.value = data.LOG_MAX_FILE_SIZE || 10485760;
         if (logMaxFilesEl) logMaxFilesEl.value = data.LOG_MAX_FILES || 10;
         
+        // TLS Sidecar 配置
+        const tlsSidecarEnabledEl = document.getElementById('tlsSidecarEnabled');
+        const tlsSidecarPortEl = document.getElementById('tlsSidecarPort');
+        if (tlsSidecarEnabledEl) tlsSidecarEnabledEl.checked = data.TLS_SIDECAR_ENABLED || false;
+        if (tlsSidecarPortEl) tlsSidecarPortEl.value = data.TLS_SIDECAR_PORT || 9090;
+        
     } catch (error) {
         console.error('Failed to load configuration:', error);
     }
@@ -274,6 +280,10 @@ async function saveConfiguration() {
     config.LOG_INCLUDE_TIMESTAMP = document.getElementById('logIncludeTimestamp')?.checked !== false;
     config.LOG_MAX_FILE_SIZE = parseInt(document.getElementById('logMaxFileSize')?.value || 10485760);
     config.LOG_MAX_FILES = parseInt(document.getElementById('logMaxFiles')?.value || 10);
+    
+    // TLS Sidecar 配置
+    config.TLS_SIDECAR_ENABLED = document.getElementById('tlsSidecarEnabled')?.checked || false;
+    config.TLS_SIDECAR_PORT = parseInt(document.getElementById('tlsSidecarPort')?.value || 9090);
 
     try {
         await window.apiClient.post('/config', config);

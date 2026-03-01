@@ -128,6 +128,21 @@
                     </div>
                     <small class="form-text" data-i18n="config.proxy.enabledProvidersNote">点击选择需要通过代理访问的提供商，未选中的提供商将直接连接</small>
                 </div>
+                <hr>
+                <div class="config-row">
+                    <div class="form-group">
+                        <label data-i18n="config.proxy.tlsSidecarEnabled">TLS 指纹伪装 (uTLS Sidecar)</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="tlsSidecarEnabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="tlsSidecarPort" data-i18n="config.proxy.tlsSidecarPort">Sidecar 端口</label>
+                        <input type="number" id="tlsSidecarPort" class="form-control" min="1024" max="65535" value="9090">
+                    </div>
+                </div>
+                <small class="form-text" data-i18n="config.proxy.tlsSidecarNote">启用后 Grok 请求将通过 Go uTLS sidecar 转发，完美模拟 Chrome TLS/H2 指纹绕过 Cloudflare（需重启服务）</small>
             </div>
 
             <!-- 服务治理与高可用 -->
