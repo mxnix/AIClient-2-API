@@ -1,7 +1,9 @@
 import { OAuth2Client } from 'google-auth-library';
+import { GaxiosError } from 'gaxios';
 import logger from '../../utils/logger.js';
 import * as http from 'http';
 import * as https from 'https';
+import * as dns from 'dns';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -10,7 +12,7 @@ import open from 'open';
 import { API_ACTIONS, formatExpiryTime, isRetryableNetworkError, formatExpiryLog } from '../../utils/common.js';
 import { getProviderModels, normalizeProviderModel, isProviderModelSupported } from '../provider-models.js';
 import { handleGeminiCliOAuth } from '../../auth/oauth-handlers.js';
-import { getProxyConfigForProvider, getGoogleAuthProxyConfig } from '../../utils/proxy-utils.js';
+import { getProxyConfigForProvider } from '../../utils/proxy-utils.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
 import { MODEL_PROVIDER } from '../../utils/common.js';
 
@@ -40,6 +42,175 @@ const GEMINI_MODELS = getProviderModels(MODEL_PROVIDER.GEMINI_CLI);
 const DEFAULT_REQUEST_MAX_RETRIES = 10;
 const QUOTA_BACKOFF_JITTER_RATIO = 0.2;
 const MAX_TRANSIENT_ERROR_RETRIES = 2;
+export const DEFAULT_GEMINI_FIXED_IPS = Object.freeze([
+    '108.177.14.95',
+    '142.250.150.95',
+    '142.251.1.95',
+    '172.253.130.95',
+    '173.194.73.95',
+    '173.194.220.95',
+    '173.194.221.95',
+    '173.194.222.95',
+    '209.85.233.95',
+    '64.233.161.95',
+    '64.233.162.95',
+    '64.233.163.95',
+    '64.233.164.95',
+    '64.233.165.95',
+    '74.125.131.95',
+    '74.125.205.95',
+]);
+const RETRYABLE_ABORT_PATTERNS = [
+    'the operation was aborted',
+    'aborterror',
+    'request was aborted',
+];
+
+function normalizeGeminiFixedIpList(rawValue) {
+    if (rawValue === undefined || rawValue === null) {
+        return [...DEFAULT_GEMINI_FIXED_IPS];
+    }
+
+    const entries = Array.isArray(rawValue)
+        ? rawValue
+        : String(rawValue)
+            .split(/[\s,]+/);
+
+    const uniqueIps = [];
+    for (const entry of entries) {
+        if (entry === undefined || entry === null) {
+            continue;
+        }
+
+        const candidate = String(entry).trim();
+        if (!candidate || uniqueIps.includes(candidate)) {
+            continue;
+        }
+
+        uniqueIps.push(candidate);
+    }
+
+    return uniqueIps;
+}
+
+function extractHostnameFromUrl(rawUrl) {
+    if (!rawUrl) {
+        return null;
+    }
+
+    try {
+        const parsed = rawUrl instanceof URL ? rawUrl : new URL(rawUrl);
+        return parsed.hostname || null;
+    } catch {
+        return null;
+    }
+}
+
+function extractGeminiErrorText(value) {
+    if (value === undefined || value === null) {
+        return '';
+    }
+
+    if (typeof value === 'string') {
+        return value;
+    }
+
+    const errorMessage = value?.error?.message;
+    if (typeof errorMessage === 'string') {
+        return errorMessage;
+    }
+
+    const topLevelMessage = value?.message;
+    if (typeof topLevelMessage === 'string') {
+        return topLevelMessage;
+    }
+
+    try {
+        return JSON.stringify(value);
+    } catch {
+        return String(value);
+    }
+}
+
+function isGeminiNoCapacityText(text) {
+    const normalized = String(text || '').toLowerCase();
+    return normalized.includes('no capacity available for model') &&
+        normalized.includes('on the server');
+}
+
+function isGeminiQuotaExhaustedText(text) {
+    return String(text || '').toLowerCase().includes('you have exhausted your capacity on this model');
+}
+
+function isRetryableAbortError(error) {
+    const errorCode = String(error?.code || error?.cause?.name || '').toLowerCase();
+    if (errorCode === 'aborterror') {
+        return true;
+    }
+
+    const errorText = `${error?.message || ''} ${error?.cause?.message || ''}`.toLowerCase();
+    return RETRYABLE_ABORT_PATTERNS.some((pattern) => errorText.includes(pattern));
+}
+
+export function classifyGeminiFixedIpResponse(response) {
+    const status = Number(response?.status);
+    const errorText = extractGeminiErrorText(response?.data);
+
+    if (status === 429) {
+        if (isGeminiNoCapacityText(errorText)) {
+            return { action: 'rotate', reason: '429-no-capacity', errorText };
+        }
+
+        if (isGeminiQuotaExhaustedText(errorText)) {
+            return { action: 'stop', reason: '429-quota-exhausted', errorText };
+        }
+
+        return { action: 'stop', reason: '429-other', errorText };
+    }
+
+    if (status >= 500 && status < 600) {
+        return { action: 'rotate', reason: `${status}-server-error`, errorText };
+    }
+
+    return { action: 'stop', reason: `status-${status || 'unknown'}`, errorText };
+}
+
+export function classifyGeminiFixedIpError(error) {
+    if (isRetryableNetworkError(error) || isRetryableAbortError(error)) {
+        return {
+            action: 'rotate',
+            reason: error?.code || error?.cause?.name || 'network-error',
+            errorText: extractGeminiErrorText(error?.message),
+        };
+    }
+
+    return {
+        action: 'stop',
+        reason: error?.code || 'non-rotatable-error',
+        errorText: extractGeminiErrorText(error?.message),
+    };
+}
+
+export function buildGeminiIpCandidateSequence(ipList, preferredIp = null) {
+    const uniqueIps = [];
+    const addIp = (value) => {
+        const candidate = String(value || '').trim();
+        if (!candidate || uniqueIps.includes(candidate)) {
+            return;
+        }
+        uniqueIps.push(candidate);
+    };
+
+    if (preferredIp) {
+        addIp(preferredIp);
+    }
+
+    for (const ip of ipList || []) {
+        addIp(ip);
+    }
+
+    return uniqueIps;
+}
 
 function parseDurationToMs(rawDuration) {
     if (rawDuration === undefined || rawDuration === null) {
@@ -399,40 +570,295 @@ async function* apply_anti_truncation_to_stream(service, model, requestBody) {
 
 export class GeminiApiService {
     constructor(config) {
-        // 检查是否需要使用代理
-        const proxyConfig = getGoogleAuthProxyConfig(config, 'gemini-cli-oauth');
-        
-        // 配置 OAuth2Client 使用自定义的 HTTP agent
-        const oauth2Options = {
-            clientId: OAUTH_CLIENT_ID,
-            clientSecret: OAUTH_CLIENT_SECRET,
-        };
-        
-        if (proxyConfig) {
-            oauth2Options.transporterOptions = proxyConfig;
-            logger.info('[Gemini] Using proxy for OAuth2Client');
-        } else {
-            oauth2Options.transporterOptions = {
-                agent: httpsAgent,
-            };
-        }
-        
-        this.authClient = new OAuth2Client(oauth2Options);
-        this.availableModels = [];
-        this.isInitialized = false;
-
         this.config = config;
         this.host = config.HOST;
         this.oauthCredsBase64 = config.GEMINI_OAUTH_CREDS_BASE64;
         this.oauthCredsFilePath = config.GEMINI_OAUTH_CREDS_FILE_PATH;
         this.projectId = config.PROJECT_ID;
         this.uuid = config.uuid;
-
         this.codeAssistEndpoint = config.GEMINI_BASE_URL || DEFAULT_CODE_ASSIST_ENDPOINT;
         this.apiVersion = DEFAULT_CODE_ASSIST_API_VERSION;
-        
-        // 保存代理配置供后续使用
         this.proxyConfig = getProxyConfigForProvider(config, 'gemini-cli-oauth');
+        this.fixedIpList = normalizeGeminiFixedIpList(config.GEMINI_FIXED_IPS);
+        this.fixedIpPreferredByHostname = new Map();
+        this.fixedIpAgentCache = new Map();
+        this.fixedIpTargetHostnames = new Set();
+        this.availableModels = [];
+        this.isInitialized = false;
+
+        const codeAssistHostname = extractHostnameFromUrl(this.codeAssistEndpoint);
+        if (codeAssistHostname) {
+            this.fixedIpTargetHostnames.add(codeAssistHostname);
+        }
+        this.fixedIpTargetHostnames.add('oauth2.googleapis.com');
+
+        this.fixedIpRotationEnabled = config.GEMINI_FIXED_IP_ROTATION_ENABLED !== false &&
+            !this.proxyConfig &&
+            this.fixedIpList.length > 0;
+
+        const oauth2Options = {
+            clientId: OAUTH_CLIENT_ID,
+            clientSecret: OAUTH_CLIENT_SECRET,
+        };
+
+        if (this.proxyConfig) {
+            oauth2Options.transporterOptions = {
+                agent: this.proxyConfig.httpsAgent,
+            };
+            logger.info('[Gemini] Using proxy for OAuth2Client');
+        } else {
+            oauth2Options.transporterOptions = {
+                agent: httpsAgent,
+            };
+        }
+
+        this.authClient = new OAuth2Client(oauth2Options);
+        this._installFixedIpTransportAdapter();
+    }
+
+    _installFixedIpTransportAdapter() {
+        if (this.proxyConfig && this.config.GEMINI_FIXED_IP_ROTATION_ENABLED !== false) {
+            logger.info('[Gemini IP] Fixed IP rotation is disabled because gemini-cli-oauth is using a proxy.');
+            return;
+        }
+
+        if (!this.fixedIpRotationEnabled) {
+            if (this.config.GEMINI_FIXED_IP_ROTATION_ENABLED === false) {
+                logger.info('[Gemini IP] Fixed IP rotation is disabled by config.');
+            }
+            return;
+        }
+
+        this.authClient.transporter.interceptors.request.add(async (requestOptions) => {
+            if (!this._shouldUseFixedIpRotation(requestOptions?.url)) {
+                return requestOptions;
+            }
+
+            return {
+                ...requestOptions,
+                adapter: async (preparedRequestOptions, defaultAdapter) => {
+                    return this._executeWithFixedIpRotation(preparedRequestOptions, defaultAdapter);
+                },
+            };
+        });
+
+        logger.info(`[Gemini IP] Fixed IP rotation enabled for hosts [${[...this.fixedIpTargetHostnames].join(', ')}] with ${this.fixedIpList.length} candidate IP(s).`);
+    }
+
+    _shouldUseFixedIpRotation(rawUrl) {
+        if (!this.fixedIpRotationEnabled) {
+            return false;
+        }
+
+        const hostname = extractHostnameFromUrl(rawUrl);
+        if (!hostname) {
+            return false;
+        }
+
+        return this.fixedIpTargetHostnames.has(hostname);
+    }
+
+    _getFixedIpCandidates(hostname) {
+        return buildGeminiIpCandidateSequence(this.fixedIpList, this.fixedIpPreferredByHostname.get(hostname));
+    }
+
+    _rememberSuccessfulFixedIp(hostname, fixedIp) {
+        if (!hostname || !fixedIp) {
+            return;
+        }
+
+        const previousIp = this.fixedIpPreferredByHostname.get(hostname);
+        this.fixedIpPreferredByHostname.set(hostname, fixedIp);
+
+        if (previousIp !== fixedIp) {
+            logger.info(`[Gemini IP] Cached fixed IP ${fixedIp} for ${hostname}.`);
+        }
+    }
+
+    _clearPreferredFixedIp(hostname, fixedIp, reason) {
+        if (!hostname || !fixedIp) {
+            return;
+        }
+
+        if (this.fixedIpPreferredByHostname.get(hostname) === fixedIp) {
+            this.fixedIpPreferredByHostname.delete(hostname);
+            logger.info(`[Gemini IP] Cleared cached fixed IP ${fixedIp} for ${hostname} after ${reason}.`);
+        }
+    }
+
+    _getFixedIpAgent(hostname, fixedIp) {
+        const cacheKey = `${hostname}|${fixedIp}`;
+        if (!this.fixedIpAgentCache.has(cacheKey)) {
+            const agent = new https.Agent({
+                keepAlive: true,
+                maxSockets: 100,
+                maxFreeSockets: 5,
+                timeout: 120000,
+                lookup: (lookupHostname, options, callback) => {
+                    const actualCallback = typeof options === 'function' ? options : callback;
+                    const actualOptions = typeof options === 'function' ? undefined : options;
+
+                    if (lookupHostname === hostname) {
+                        actualCallback(null, fixedIp, 4);
+                        return;
+                    }
+
+                    if (actualOptions === undefined) {
+                        dns.lookup(lookupHostname, actualCallback);
+                        return;
+                    }
+
+                    dns.lookup(lookupHostname, actualOptions, actualCallback);
+                },
+            });
+
+            this.fixedIpAgentCache.set(cacheKey, agent);
+        }
+
+        return this.fixedIpAgentCache.get(cacheKey);
+    }
+
+    _createFixedIpAttemptOptions(requestOptions, hostname, fixedIp) {
+        return {
+            ...requestOptions,
+            agent: this._getFixedIpAgent(hostname, fixedIp),
+            _geminiFixedIp: fixedIp,
+        };
+    }
+
+    async _hydrateErrorResponseBody(response) {
+        if (!response || response.data === undefined || response.data === null) {
+            return response;
+        }
+
+        const currentData = response.data;
+        if (typeof currentData === 'string') {
+            return response;
+        }
+
+        const isAsyncIterable = typeof currentData?.[Symbol.asyncIterator] === 'function';
+        const isWebStream = typeof currentData?.getReader === 'function';
+        if (!isAsyncIterable && !isWebStream) {
+            return response;
+        }
+
+        let rawBody = '';
+
+        if (isAsyncIterable) {
+            for await (const chunk of currentData) {
+                if (typeof chunk === 'string') {
+                    rawBody += chunk;
+                } else {
+                    rawBody += Buffer.from(chunk).toString('utf8');
+                }
+            }
+        } else {
+            const reader = currentData.getReader();
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    break;
+                }
+                rawBody += typeof value === 'string' ? value : Buffer.from(value).toString('utf8');
+            }
+        }
+
+        if (!rawBody) {
+            response.data = rawBody;
+            return response;
+        }
+
+        try {
+            response.data = JSON.parse(rawBody);
+        } catch {
+            response.data = rawBody;
+        }
+
+        return response;
+    }
+
+    _createFixedIpResponseError(requestOptions, response) {
+        const message = extractGeminiErrorText(response?.data) || `Request failed with status code ${response?.status || 'unknown'}`;
+        return new GaxiosError(message, requestOptions, response);
+    }
+
+    async _executeWithFixedIpRotation(requestOptions, defaultAdapter) {
+        if (!this._shouldUseFixedIpRotation(requestOptions?.url)) {
+            return defaultAdapter(requestOptions);
+        }
+
+        const hostname = extractHostnameFromUrl(requestOptions?.url);
+        const candidateIps = this._getFixedIpCandidates(hostname);
+        if (candidateIps.length === 0) {
+            return defaultAdapter(requestOptions);
+        }
+
+        let lastResponseError = null;
+        let lastTransportError = null;
+
+        for (let attemptIndex = 0; attemptIndex < candidateIps.length; attemptIndex++) {
+            const fixedIp = candidateIps[attemptIndex];
+            const attemptOptions = this._createFixedIpAttemptOptions(requestOptions, hostname, fixedIp);
+
+            try {
+                const response = await defaultAdapter(attemptOptions);
+
+                if (response.status >= 200 && response.status < 300) {
+                    this._rememberSuccessfulFixedIp(hostname, fixedIp);
+                    logger.info(`[Gemini IP] ${hostname} request succeeded via fixed IP ${fixedIp}.`);
+                    return response;
+                }
+
+                await this._hydrateErrorResponseBody(response);
+                const decision = classifyGeminiFixedIpResponse(response);
+                const hasNextIp = attemptIndex < candidateIps.length - 1;
+
+                if (decision.action === 'rotate' && hasNextIp) {
+                    this._clearPreferredFixedIp(hostname, fixedIp, decision.reason);
+                    logger.warn(`[Gemini IP] ${hostname} returned ${response.status} via fixed IP ${fixedIp} (${decision.reason}). Switching to next fixed IP (${attemptIndex + 2}/${candidateIps.length}).`);
+                    lastResponseError = this._createFixedIpResponseError(attemptOptions, response);
+                    continue;
+                }
+
+                if (decision.reason === '429-quota-exhausted') {
+                    logger.info(`[Gemini IP] ${hostname} fixed IP ${fixedIp} returned quota exhaustion. Falling back to the project's existing retry/quota handling.`);
+                } else if (decision.action === 'rotate') {
+                    logger.warn(`[Gemini IP] ${hostname} still returned ${response.status} via fixed IP ${fixedIp} after exhausting fixed IP candidates.`);
+                }
+
+                throw this._createFixedIpResponseError(attemptOptions, response);
+            } catch (error) {
+                if (error instanceof GaxiosError && error.response) {
+                    throw error;
+                }
+
+                const decision = classifyGeminiFixedIpError(error);
+                const hasNextIp = attemptIndex < candidateIps.length - 1;
+
+                if (decision.action === 'rotate' && hasNextIp) {
+                    this._clearPreferredFixedIp(hostname, fixedIp, decision.reason);
+                    logger.warn(`[Gemini IP] ${hostname} transport failed via fixed IP ${fixedIp} (${decision.reason}). Switching to next fixed IP (${attemptIndex + 2}/${candidateIps.length}).`);
+                    lastTransportError = error;
+                    continue;
+                }
+
+                if (decision.action === 'rotate') {
+                    logger.warn(`[Gemini IP] ${hostname} transport still failed via fixed IP ${fixedIp} (${decision.reason}) and no fixed IP candidates remain.`);
+                }
+
+                throw error;
+            }
+        }
+
+        if (lastResponseError) {
+            throw lastResponseError;
+        }
+
+        if (lastTransportError) {
+            throw lastTransportError;
+        }
+
+        return defaultAdapter(requestOptions);
     }
 
     async initialize() {

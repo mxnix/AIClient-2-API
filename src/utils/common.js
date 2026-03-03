@@ -24,6 +24,9 @@ export const RETRYABLE_NETWORK_ERRORS = [
     'EAI_AGAIN',       // DNS 临时失败
     'ECONNABORTED',    // 连接中止
     'ESOCKETTIMEDOUT', // Socket 超时
+    'AbortError',      // fetch/gaxios abort
+    'ERR_ABORTED',     // 浏览器/兼容层 abort
+    'The operation was aborted', // node-fetch timeout/abort message
 ];
 
 /**

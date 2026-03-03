@@ -13,6 +13,7 @@ usage-cache.json
 *-auth-token.json
 api-potluck-keys.json
 api-potluck-data.json
+/logs
 # Codex credentials
 configs/codex/
 

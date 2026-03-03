@@ -12,6 +12,9 @@ export default {
     }
   },
   moduleNameMapper: {
+    '^\\.\\./\\.\\./auth/oauth-handlers(?:\\.js)?$': '<rootDir>/tests/mocks/oauth-handlers.js',
+    '^\\.\\./\\.\\./services/service-manager(?:\\.js)?$': '<rootDir>/tests/mocks/service-manager.js',
+    '^open$': '<rootDir>/tests/mocks/open.js',
     '^(\\.{1,2}/.*)\\.js$': '$1'
   },
   testMatch: [
