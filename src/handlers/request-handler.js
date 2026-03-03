@@ -11,6 +11,7 @@ import { PROMPT_LOG_FILENAME } from '../core/config-manager.js';
 import { handleOllamaRequest, handleOllamaShow } from './ollama-handler.js';
 import { getPluginManager } from '../core/plugin-manager.js';
 import { randomUUID } from 'crypto';
+import { handleGrokAssetsProxy } from '../utils/grok-assets-proxy.js';
 
 /**
  * Generate a short unique request ID (8 characters)
@@ -53,6 +54,12 @@ export function createRequestHandler(config, providerPoolManager) {
 
         // Deep copy the config for each request to allow dynamic modification
         const currentConfig = deepmerge({}, config);
+        
+        // 计算当前请求的基础 URL
+        const protocol = req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+        const host = req.headers.host;
+        currentConfig.requestBaseUrl = `${protocol}://${host}`;
+        
         const requestUrl = new URL(req.url, `http://${req.headers.host}`);
         let path = requestUrl.pathname;
         const method = req.method;
@@ -103,6 +110,12 @@ export function createRequestHandler(config, providerPoolManager) {
                 timestamp: new Date().toISOString(),
                 provider: currentConfig.MODEL_PROVIDER
             }));
+            return true;
+        }
+
+        // Grok assets proxy endpoint
+        if (method === 'GET' && path === '/api/grok/assets') {
+            await handleGrokAssetsProxy(req, res, currentConfig, providerPoolManager);
             return true;
         }
 

@@ -151,6 +151,9 @@ export class ForwardApiService {
             this.config._monitorRequestId = requestBody._monitorRequestId;
             delete requestBody._monitorRequestId;
         }
+        if (requestBody._requestBaseUrl) {
+            delete requestBody._requestBaseUrl;
+        }
 
         // Transparently pass the endpoint if provided in requestBody, otherwise use default
         const endpoint = requestBody.endpoint || '';
@@ -162,6 +165,9 @@ export class ForwardApiService {
         if (requestBody._monitorRequestId) {
             this.config._monitorRequestId = requestBody._monitorRequestId;
             delete requestBody._monitorRequestId;
+        }
+        if (requestBody._requestBaseUrl) {
+            delete requestBody._requestBaseUrl;
         }
 
         const endpoint = requestBody.endpoint || '';

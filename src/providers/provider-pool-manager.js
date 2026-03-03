@@ -598,6 +598,20 @@ export class ProviderPoolManager {
     }
 
     /**
+     * 根据 UUID 在所有池中查找提供商配置
+     * @param {string} uuid - 提供商 UUID
+     * @returns {object|null} 提供商配置对象或 null
+     */
+    findProviderByUuid(uuid) {
+        if (!uuid) return null;
+        for (const type in this.providerStatus) {
+            const provider = this.providerStatus[type].find(p => p.uuid === uuid);
+            if (provider) return provider.config;
+        }
+        return null;
+    }
+
+    /**
      * Initializes the status for each provider in the pools.
      * Initially, all providers are considered healthy and have zero usage.
      */

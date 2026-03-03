@@ -1000,6 +1000,11 @@ export async function handleContentGenerationRequest(req, res, service, endpoint
     if (CONFIG._monitorRequestId) {
         processedRequestBody._monitorRequestId = CONFIG._monitorRequestId;
     }
+    
+    // 将 requestBaseUrl 注入到 requestBody 中，以便在转换器中使用
+    if (CONFIG.requestBaseUrl) {
+        processedRequestBody._requestBaseUrl = CONFIG.requestBaseUrl;
+    }
 
     // fs.writeFile('originalRequestBody'+Date.now()+'.json', JSON.stringify(originalRequestBody));
     if (getProtocolPrefix(fromProvider) !== getProtocolPrefix(toProvider)) {

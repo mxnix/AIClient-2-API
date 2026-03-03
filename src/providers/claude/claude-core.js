@@ -231,6 +231,9 @@ export class ClaudeApiService {
             this.config._monitorRequestId = requestBody._monitorRequestId;
             delete requestBody._monitorRequestId;
         }
+        if (requestBody._requestBaseUrl) {
+            delete requestBody._requestBaseUrl;
+        }
         
         const response = await this.callApi('/messages', requestBody);
         return response;

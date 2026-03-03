@@ -162,6 +162,9 @@ export class OpenAIResponsesApiService {
             this.config._monitorRequestId = requestBody._monitorRequestId;
             delete requestBody._monitorRequestId;
         }
+        if (requestBody._requestBaseUrl) {
+            delete requestBody._requestBaseUrl;
+        }
 
         return this.callApi('/responses', requestBody);
     }
@@ -171,6 +174,9 @@ export class OpenAIResponsesApiService {
         if (requestBody._monitorRequestId) {
             this.config._monitorRequestId = requestBody._monitorRequestId;
             delete requestBody._monitorRequestId;
+        }
+        if (requestBody._requestBaseUrl) {
+            delete requestBody._requestBaseUrl;
         }
 
         yield* this.streamApi('/responses', requestBody);

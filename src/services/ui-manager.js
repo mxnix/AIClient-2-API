@@ -64,7 +64,7 @@ export async function handleUIApiRequests(method, pathParam, req, res, currentCo
     }
     
     // Handle UI management API requests (需要token验证，除了登录接口、健康检查和Events接口)
-    if (pathParam.startsWith('/api/') && pathParam !== '/api/login' && pathParam !== '/api/health' && pathParam !== '/api/events' ) {
+    if (pathParam.startsWith('/api/') && pathParam !== '/api/login' && pathParam !== '/api/health' && pathParam !== '/api/events' && pathParam !== '/api/grok/assets') {
         // 检查token验证
         const isAuth = await auth.checkAuth(req);
         if (!isAuth) {

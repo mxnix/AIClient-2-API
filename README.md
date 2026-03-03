@@ -18,7 +18,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/mxnix/AIClient-2-API.svg?style=flat&label=Star)](https://github.com/mxnix/AIClient-2-API/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/mxnix/AIClient-2-API.svg)](https://github.com/mxnix/AIClient-2-API/issues)
 
-[**🔧 Конфиг OpenClaw**](./docs/OPENCLAW_CONFIG_GUIDE.md) | [中文](./README-ZH.md) | [English](./README.md) | [日本語](./README-JA.md) | [**👉 Русский**](./README-RU.md) | [**📚 Documentation**](https://aiproxy.justlikemaki.vip/en/)
+[**🔧 Конфиг OpenClaw**](./docs/OPENCLAW_CONFIG_GUIDE.md) | [中文](./README-ZH.md) | [English](./README-EN.md) | [日本語](./README-JA.md) | [**👉 Русский**](./README.md) | [**📚 Documentation**](https://aiproxy.justlikemaki.vip/en/)
 
 </div>
 
@@ -34,6 +34,7 @@
 > <details>
 > <summary>Нажмите, чтобы развернуть подробную историю версий</summary>
 >
+> - **2026.03.02** - Добавлена поддержка протокола Grok: доступ к моделям xAI Grok (Grok 3/4) через Cookie/SSO, поддержка мультимодального ввода, генерации изображений и видео, автообновления token и streaming-вывода
 > - **2026.01.26** - Добавлена поддержка протокола Codex: поддержан вход через OAuth OpenAI Codex
 > - **2026.01.25** - Улучшен плагин AI Monitor: поддержан мониторинг параметров запросов и ответов до и после преобразования AI-протокола. Оптимизировано управление логами: единый формат логов, визуальная настройка
 > - **2026.01.15** - Оптимизирован менеджер пулов провайдеров: добавлены асинхронная очередь обновления, дедупликация буферной очереди, глобальный контроль параллелизма, прогрев нод и автообнаружение истечения срока
@@ -61,7 +62,7 @@
 ## 💡 Ключевые преимущества
 
 ### 🎯 Единый доступ и централизованное управление
-*   **Единый интерфейс для множества моделей**: через стандартный OpenAI-совместимый протокол достаточно одной настройки для доступа к основным LLM, включая Gemini, Claude, Qwen Code, Kimi K2, MiniMax M2
+*   **Единый интерфейс для множества моделей**: через стандартный OpenAI-совместимый протокол достаточно одной настройки для доступа к основным LLM, включая Gemini, Claude, Grok, Qwen Code, Kimi K2, MiniMax M2
 *   **Гибкий механизм переключения**: маршрутизация по path, динамическое переключение моделей через параметры запуска или переменные окружения под разные сценарии
 *   **Миграция без затрат**: полная совместимость со спецификацией OpenAI API, инструменты вроде Cherry-Studio, NextChat, Cline работают без модификаций
 *   **Интеллектуальное преобразование протоколов**: поддержка преобразования между OpenAI, Claude и Gemini для вызовов моделей между протоколами
@@ -200,7 +201,7 @@ docker compose up -d
 
 **📊 Dashboard**: обзор системы, интерактивные примеры маршрутизации, гайд по настройке клиента
 
-**⚙️ Configuration**: изменение параметров в реальном времени, поддержка всех провайдеров (Gemini, Antigravity, OpenAI, Claude, Kiro, Qwen), включая продвинутые настройки и загрузку файлов
+**⚙️ Configuration**: изменение параметров в реальном времени, поддержка всех провайдеров (Gemini, Antigravity, OpenAI, Claude, Kiro, Qwen, iFlow, Grok), включая продвинутые настройки и загрузку файлов
 
 **🔗 Provider Pools**: мониторинг активных подключений, статистика здоровья провайдеров, управление включением/отключением
 
@@ -217,6 +218,7 @@ docker compose up -d
 
 #### Поддержка новейших моделей
 Бесшовно поддерживаются следующие актуальные большие модели, достаточно настроить соответствующий endpoint в Web UI или в [`configs/config.json`](./configs/config.json):
+*   **Grok 3 / Grok 4** - флагманские модели xAI, поддерживаются через Grok Cookie/SSO, включая режим thinking, генерацию изображений и видео
 *   **Claude 4.5 Opus** - самая мощная модель Anthropic на текущий момент, поддерживается через Kiro, Antigravity
 *   **Gemini 3 Pro** - превью архитектуры нового поколения от Google, поддерживается через Gemini, Antigravity
 *   **Qwen3 Coder Plus** - свежая кодовая модель Tongyi Qianwen от Alibaba, поддерживается через Qwen Code
@@ -317,6 +319,15 @@ curl http://localhost:3000/claude-kiro-oauth/v1/chat/completions \
 3. **Автосохранение**: после успешной авторизации система автоматически сохранит файл учетных данных Codex OAuth
 4. **Порт callback**: убедитесь, что OAuth callback порт `1455` не занят
 
+#### Конфигурация Grok Cookie/SSO
+1. **Получите SSO token**: войдите на [официальный сайт Grok](https://grok.com/) и в DevTools браузера скопируйте значение cookie `sso` из раздела Application -> Cookies
+2. **Заполните конфигурацию**: в Web UI на странице "Configuration" или напрямую в конфиге укажите token в поле `GROK_COOKIE_TOKEN`
+3. **Поддерживаемые возможности**:
+   - чат и thinking-модели (Grok 3 Thinking)
+   - генерация изображений (Grok Imagine)
+   - генерация видео (Grok Video)
+4. **Примечание**: для снижения риска блокировок `GROK_USER_AGENT` должен совпадать с браузером, из которого был получен cookie
+
 #### Настройка управления пулом аккаунтов
 1. **Создайте файл конфигурации пула**: ориентируйтесь на [provider_pools.json.example](./configs/provider_pools.json.example)
 2. **Настройте параметры пула**: укажите `PROVIDER_POOLS_FILE_PATH` в `configs/config.json`, чтобы он указывал на файл конфигурации пула
@@ -379,6 +390,7 @@ curl http://localhost:3000/ollama/api/chat \
 - `[Claude]` - использование официального Claude API
 - `[Gemini CLI]` - доступ через Gemini CLI OAuth
 - `[OpenAI]` - использование официального OpenAI API
+- `[Grok]` - доступ через Grok Cookie/SSO
 - `[Qwen CLI]` - доступ через Qwen OAuth
 
 ---
@@ -408,12 +420,13 @@ curl http://localhost:3000/ollama/api/chat \
    ```json
    {
      "PROXY_URL": "http://127.0.0.1:7890",
-     "PROXY_ENABLED_PROVIDERS": [
-       "gemini-cli-oauth",
-       "gemini-antigravity",
-       "claude-kiro-oauth"
-     ]
-   }
+      "PROXY_ENABLED_PROVIDERS": [
+        "gemini-cli-oauth",
+        "gemini-antigravity",
+        "claude-kiro-oauth",
+        "grok-custom"
+      ]
+}
    ```
 
 3. **Проксированные endpoint для конкретных провайдеров**: некоторые провайдеры (например OpenAI, Claude) поддерживают настройку проксированных API endpoint

@@ -121,7 +121,11 @@ func (rt *utlsRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 
 	if alpn == "h2" {
 		// HTTP/2: 创建 H2 ClientConn
-		cc, err := (&http2.Transport{}).NewClientConn(conn)
+		t2 := &http2.Transport{
+			StrictMaxConcurrentStreams: true,
+			AllowHTTP:                  false,
+		}
+		cc, err := t2.NewClientConn(conn)
 		if err != nil {
 			conn.Close()
 			return nil, fmt.Errorf("h2 client conn: %w", err)
@@ -170,6 +174,9 @@ func (rt *utlsRoundTripper) CloseIdleConnections() {
 // ──────────────── Main ────────────────
 
 func main() {
+	// 强制将日志输出到 Stdout，避免 Node.js 侧将其误判为 Error
+	log.SetOutput(os.Stdout)
+
 	port := defaultPort
 	if p := os.Getenv("TLS_SIDECAR_PORT"); p != "" {
 		if v, err := strconv.Atoi(p); err == nil {
@@ -240,20 +247,30 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Copy headers (skip internal + hop-by-hop)
+	// 403 关键修复：彻底清理所有非浏览器标头，严格保持小写
 	for key, vals := range r.Header {
 		lk := strings.ToLower(key)
 		if lk == strings.ToLower(headerTarget) || lk == strings.ToLower(headerProxy) {
 			continue
 		}
+		// 移除所有代理、本地网络特征标头，防止 Cloudflare 识别
 		if lk == "connection" || lk == "keep-alive" || lk == "transfer-encoding" ||
-			lk == "te" || lk == "trailer" || lk == "upgrade" || lk == "host" {
+			lk == "te" || lk == "trailer" || lk == "upgrade" || lk == "host" ||
+			lk == "x-forwarded-for" || lk == "x-real-ip" || lk == "x-forwarded-proto" ||
+			lk == "x-forwarded-host" || lk == "via" || lk == "proxy-connection" ||
+			lk == "cf-connecting-ip" || lk == "true-client-ip" {
 			continue
 		}
-		for _, v := range vals {
-			outReq.Header.Add(key, v)
-		}
+		// 直接通过 map 赋值，确保 Go 的 http2 栈能识别并以原始（小写）形式发出
+		outReq.Header[key] = vals
 	}
 	outReq.Host = parsed.Host
+
+	// 针对 Grok 的特殊处理：如果 Accept-Encoding 包含 br 且环境可能存在压缩协商问题
+	// 强制设置为标准的浏览器组合
+	if ae := outReq.Header["Accept-Encoding"]; len(ae) > 0 {
+		outReq.Header["Accept-Encoding"] = []string{"gzip, deflate, br, zstd"}
+	}
 
 	// Execute via uTLS RoundTripper
 	rt := getOrCreateRT(proxyURL)
@@ -316,7 +333,8 @@ func dialUTLS(ctx context.Context, network, addr string, proxyURL string) (*utls
 		return nil, fmt.Errorf("tcp dial failed: %w", err)
 	}
 
-	// uTLS 握手 — Chrome 最新指纹 (HelloChrome_Auto 跟随 utls 库更新)
+	// uTLS 握手 — 使用 Chrome 最新自动指纹
+	// 403 错误通过保持标头小写和清理转发标头来解决
 	tlsConn := utls.UClient(rawConn, &utls.Config{
 		ServerName: host,
 		NextProtos: []string{"h2", "http/1.1"},
