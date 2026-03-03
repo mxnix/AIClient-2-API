@@ -1,9 +1,13 @@
 import {
     IP_STATUS,
+    MANUAL_REFRESH_CALLBACK_DATA,
     OVERALL_STATUS,
     buildCaption,
+    buildRefreshReplyMarkup,
     classifyGeminiProbeResult,
     computeOverallStatus,
+    formatCooldownDuration,
+    getManualRefreshCooldownMs,
     normalizeGeminiCheckModel,
 } from '../../../integrations/gemini-cli-telegram-monitor/monitor-utils.js';
 
@@ -78,5 +82,32 @@ describe('gemini telegram monitor utils', () => {
     test('normalizes gemini alias model names', () => {
         expect(normalizeGeminiCheckModel('gemini-3.1-pro')).toBe('gemini-3.1-pro-preview');
         expect(normalizeGeminiCheckModel('models/gemini-3-pro')).toBe('gemini-3-pro-preview');
+    });
+
+    test('builds refresh reply markup for the channel post button', () => {
+        expect(buildRefreshReplyMarkup()).toEqual({
+            inline_keyboard: [[
+                {
+                    text: 'Обновить',
+                    callback_data: MANUAL_REFRESH_CALLBACK_DATA,
+                },
+            ]],
+        });
+    });
+
+    test('uses the longer remaining cooldown between global and per-user limits', () => {
+        expect(getManualRefreshCooldownMs({
+            nowMs: 1_000,
+            lastCompletedAtMs: 900,
+            lastUserRefreshAtMs: 950,
+            globalCooldownMs: 500,
+            userCooldownMs: 100,
+        })).toBe(400);
+    });
+
+    test('formats cooldown durations for callback responses', () => {
+        expect(formatCooldownDuration(45_000)).toBe('45 сек');
+        expect(formatCooldownDuration(3 * 60 * 1000)).toBe('3 мин');
+        expect(formatCooldownDuration(125_000)).toBe('2 мин 5 сек');
     });
 });

@@ -34,6 +34,24 @@ function readNumberEnv(name, fallbackValue, minimum = null) {
     return parsedValue;
 }
 
+function readBooleanEnv(name, fallbackValue) {
+    const rawValue = readEnv(name);
+    if (rawValue === null) {
+        return fallbackValue;
+    }
+
+    const normalized = rawValue.toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+        return true;
+    }
+
+    if (['0', 'false', 'no', 'off'].includes(normalized)) {
+        return false;
+    }
+
+    throw new Error(`Environment variable ${name} must be a boolean-like value.`);
+}
+
 function readMessageIdEnv(name) {
     const rawValue = readEnv(name);
     if (rawValue === null) {
@@ -167,6 +185,13 @@ export async function loadMonitorConfig() {
             botToken: readEnv('TELEGRAM_BOT_TOKEN'),
             chatId: readEnv('TELEGRAM_CHAT_ID'),
             messageId: readMessageIdEnv('TELEGRAM_MESSAGE_ID'),
+        },
+        manualRefresh: {
+            enabled: readBooleanEnv('MANUAL_REFRESH_ENABLED', true),
+            globalCooldownMs: readNumberEnv('MANUAL_REFRESH_GLOBAL_COOLDOWN_MS', 5 * 60 * 1000, 0),
+            userCooldownMs: readNumberEnv('MANUAL_REFRESH_USER_COOLDOWN_MS', 60 * 1000, 0),
+            pollingTimeoutSec: readNumberEnv('TELEGRAM_GET_UPDATES_TIMEOUT_SEC', 30, 0),
+            pollingErrorRetryMs: readNumberEnv('TELEGRAM_GET_UPDATES_ERROR_RETRY_MS', 5 * 1000, 250),
         },
         assetsDir: readEnv('MONITOR_ASSETS_DIR') || '/assets',
         stateFilePath: readEnv('MONITOR_STATE_FILE') || '/data/state.json',

@@ -49,6 +49,8 @@ export const STATUS_IMAGE_FILENAMES = Object.freeze({
     [OVERALL_STATUS.ISSUE]: 'somethingwrong.png',
 });
 
+export const MANUAL_REFRESH_CALLBACK_DATA = 'refresh_gemini_monitor';
+
 const GEMINI_MODEL_ALIASES = Object.freeze({
     'gemini-3.1-pro': 'gemini-3.1-pro-preview',
     'gemini-3-pro': 'gemini-3-pro-preview',
@@ -270,6 +272,53 @@ export function formatMoscowTimestamp(date = new Date()) {
     });
 
     return `${formatter.format(date).replace(',', '')} МСК`;
+}
+
+export function buildRefreshReplyMarkup() {
+    return {
+        inline_keyboard: [[
+            {
+                text: 'обновить',
+                callback_data: MANUAL_REFRESH_CALLBACK_DATA,
+            },
+        ]],
+    };
+}
+
+export function getManualRefreshCooldownMs({
+    nowMs = Date.now(),
+    lastCompletedAtMs = null,
+    lastUserRefreshAtMs = null,
+    globalCooldownMs = 0,
+    userCooldownMs = 0,
+}) {
+    let remainingMs = 0;
+
+    if (Number.isFinite(lastCompletedAtMs) && globalCooldownMs > 0) {
+        remainingMs = Math.max(remainingMs, lastCompletedAtMs + globalCooldownMs - nowMs);
+    }
+
+    if (Number.isFinite(lastUserRefreshAtMs) && userCooldownMs > 0) {
+        remainingMs = Math.max(remainingMs, lastUserRefreshAtMs + userCooldownMs - nowMs);
+    }
+
+    return Math.max(0, remainingMs);
+}
+
+export function formatCooldownDuration(ms) {
+    const totalSeconds = Math.max(1, Math.ceil(Number(ms || 0) / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    if (minutes > 0 && seconds > 0) {
+        return `${minutes} мин ${seconds} сек`;
+    }
+
+    if (minutes > 0) {
+        return `${minutes} мин`;
+    }
+
+    return `${seconds} сек`;
 }
 
 export function buildCaption({ overallStatus, lastCheckedAt, ipResults }) {

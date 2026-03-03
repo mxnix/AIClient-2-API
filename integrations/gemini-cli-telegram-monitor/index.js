@@ -8,12 +8,16 @@ import { OAuth2Client } from 'google-auth-library';
 import { loadMonitorConfig } from './config.js';
 import {
     IP_STATUS,
+    MANUAL_REFRESH_CALLBACK_DATA,
     STATUS_IMAGE_FILENAMES,
     buildCaption,
+    buildRefreshReplyMarkup,
     classifyGeminiProbeResult,
     computeOverallStatus,
     extractErrorText,
+    formatCooldownDuration,
     formatMoscowTimestamp,
+    getManualRefreshCooldownMs,
     resolveStatusImagePath,
 } from './monitor-utils.js';
 
@@ -46,6 +50,61 @@ async function loadJsonState(filePath) {
 async function saveJsonState(filePath, state) {
     await ensureDirectoryExists(filePath);
     await fs.writeFile(filePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+}
+
+function cloneJsonCompatibleState(state) {
+    return JSON.parse(JSON.stringify(state));
+}
+
+function createStatePersister(filePath, state) {
+    let pendingSave = Promise.resolve();
+
+    return async function persistState() {
+        const snapshot = cloneJsonCompatibleState(state);
+        pendingSave = pendingSave
+            .catch(() => {})
+            .then(() => saveJsonState(filePath, snapshot));
+        return pendingSave;
+    };
+}
+
+function normalizeTimestamp(value) {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : null;
+}
+
+function normalizeUserCooldowns(rawValue) {
+    if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) {
+        return {};
+    }
+
+    const normalized = {};
+    for (const [userId, timestamp] of Object.entries(rawValue)) {
+        const normalizedTimestamp = normalizeTimestamp(timestamp);
+        if (normalizedTimestamp !== null) {
+            normalized[userId] = normalizedTimestamp;
+        }
+    }
+
+    return normalized;
+}
+
+function pruneExpiredUserCooldowns(state, userCooldownMs, nowMs = Date.now()) {
+    if (!state?.userCooldowns || typeof state.userCooldowns !== 'object') {
+        state.userCooldowns = {};
+        return;
+    }
+
+    if (!Number.isFinite(userCooldownMs) || userCooldownMs <= 0) {
+        state.userCooldowns = {};
+        return;
+    }
+
+    for (const [userId, timestamp] of Object.entries(state.userCooldowns)) {
+        if (!Number.isFinite(timestamp) || nowMs - timestamp >= userCooldownMs) {
+            delete state.userCooldowns[userId];
+        }
+    }
 }
 
 async function assertAssetsExist(config) {
@@ -388,6 +447,9 @@ class TelegramStatusPublisher {
     constructor(config) {
         this.config = config;
         this.telegramConfig = config.telegram;
+        this.refreshReplyMarkup = config.manualRefresh.enabled
+            ? buildRefreshReplyMarkup()
+            : null;
     }
 
     buildApiUrl(methodName) {
@@ -422,6 +484,14 @@ class TelegramStatusPublisher {
         return new Blob([buffer], { type: 'image/png' });
     }
 
+    appendRefreshReplyMarkup(target) {
+        if (!this.refreshReplyMarkup) {
+            return;
+        }
+
+        target.append('reply_markup', JSON.stringify(this.refreshReplyMarkup));
+    }
+
     async sendPhotoMessage(caption, imagePath) {
         const formData = new FormData();
         formData.append('chat_id', this.telegramConfig.chatId);
@@ -429,6 +499,7 @@ class TelegramStatusPublisher {
         formData.append('parse_mode', 'HTML');
         formData.append('show_caption_above_media', 'true');
         formData.append('disable_notification', 'true');
+        this.appendRefreshReplyMarkup(formData);
         formData.append('photo', await this.createPngBlob(imagePath), path.basename(imagePath));
         return this.callTelegram('sendPhoto', formData);
     }
@@ -444,18 +515,25 @@ class TelegramStatusPublisher {
             parse_mode: 'HTML',
             show_caption_above_media: true,
         }));
+        this.appendRefreshReplyMarkup(formData);
         formData.append('photo', await this.createPngBlob(imagePath), path.basename(imagePath));
         return this.callTelegram('editMessageMedia', formData);
     }
 
     async editMessageCaption(messageId, caption) {
-        return this.callTelegramJson('editMessageCaption', {
+        const payload = {
             chat_id: this.telegramConfig.chatId,
             message_id: messageId,
             caption,
             parse_mode: 'HTML',
             show_caption_above_media: true,
-        });
+        };
+
+        if (this.refreshReplyMarkup) {
+            payload.reply_markup = this.refreshReplyMarkup;
+        }
+
+        return this.callTelegramJson('editMessageCaption', payload);
     }
 
     async pinMessage(messageId) {
@@ -475,6 +553,23 @@ class TelegramStatusPublisher {
         return message.includes('message to edit not found') ||
             message.includes('message can\'t be edited') ||
             message.includes('message identifier is not specified');
+    }
+
+    async getUpdates(offset) {
+        return this.callTelegramJson('getUpdates', {
+            offset,
+            timeout: this.config.manualRefresh.pollingTimeoutSec,
+            allowed_updates: ['callback_query'],
+        });
+    }
+
+    async answerCallbackQuery(callbackQueryId, text) {
+        return this.callTelegramJson('answerCallbackQuery', {
+            callback_query_id: callbackQueryId,
+            text,
+            show_alert: false,
+            cache_time: 0,
+        });
     }
 
     async publishSummary(summary, state) {
@@ -514,6 +609,192 @@ class TelegramStatusPublisher {
     }
 }
 
+class MonitorRuntime {
+    constructor(config, state, probeClient, publisher, persistState) {
+        this.config = config;
+        this.state = state;
+        this.probeClient = probeClient;
+        this.publisher = publisher;
+        this.persistState = persistState;
+        this.refreshPromise = null;
+        this.nextScheduledRunAt = Date.now();
+    }
+
+    isRefreshing() {
+        return this.refreshPromise !== null;
+    }
+
+    isCurrentMessage(messageId) {
+        return !this.state.messageId || !messageId || this.state.messageId === messageId;
+    }
+
+    scheduleNextRun(baseTimeMs = Date.now()) {
+        this.nextScheduledRunAt = baseTimeMs + this.config.checkIntervalMs;
+    }
+
+    getManualRefreshCooldownMs(userId, nowMs = Date.now()) {
+        pruneExpiredUserCooldowns(this.state, this.config.manualRefresh.userCooldownMs, nowMs);
+
+        const userKey = userId === undefined || userId === null
+            ? null
+            : String(userId);
+
+        return getManualRefreshCooldownMs({
+            nowMs,
+            lastCompletedAtMs: this.state.lastRunFinishedAtMs,
+            lastUserRefreshAtMs: userKey ? this.state.userCooldowns[userKey] || null : null,
+            globalCooldownMs: this.config.manualRefresh.globalCooldownMs,
+            userCooldownMs: this.config.manualRefresh.userCooldownMs,
+        });
+    }
+
+    getManualRefreshDecision(userId) {
+        const nowMs = Date.now();
+
+        if (this.isRefreshing()) {
+            return {
+                accepted: false,
+                message: 'проверка уже идет...',
+            };
+        }
+
+        const remainingCooldownMs = this.getManualRefreshCooldownMs(userId, nowMs);
+        if (remainingCooldownMs > 0) {
+            return {
+                accepted: false,
+                message: `подожди ${formatCooldownDuration(remainingCooldownMs)}`,
+            };
+        }
+
+        return {
+            accepted: true,
+            message: 'обновляю...',
+        };
+    }
+
+    async runCheck(trigger, metadata = {}) {
+        if (this.refreshPromise) {
+            return this.refreshPromise;
+        }
+
+        const refreshPromise = (async () => {
+            const startedAtMs = Date.now();
+            this.state.lastRunStartedAtMs = startedAtMs;
+            this.state.lastRunTrigger = trigger;
+            await this.persistState();
+
+            try {
+                return await runMonitorIteration(
+                    this.probeClient,
+                    this.publisher,
+                    this.config,
+                    this.state,
+                    this.persistState,
+                    trigger
+                );
+            } finally {
+                const finishedAtMs = Date.now();
+                this.state.lastRunFinishedAtMs = finishedAtMs;
+                this.scheduleNextRun(finishedAtMs);
+
+                if (trigger === 'manual' && metadata.userId !== undefined && metadata.userId !== null) {
+                    this.state.lastManualRefreshAtMs = finishedAtMs;
+                    this.state.lastManualRefreshBy = String(metadata.userId);
+                }
+
+                pruneExpiredUserCooldowns(this.state, this.config.manualRefresh.userCooldownMs, finishedAtMs);
+                await this.persistState();
+            }
+        })();
+
+        this.refreshPromise = refreshPromise;
+
+        try {
+            return await refreshPromise;
+        } finally {
+            this.refreshPromise = null;
+        }
+    }
+
+    startManualRefresh(userId) {
+        const nowMs = Date.now();
+        const userKey = userId === undefined || userId === null
+            ? null
+            : String(userId);
+
+        if (userKey) {
+            this.state.userCooldowns[userKey] = nowMs;
+        }
+        pruneExpiredUserCooldowns(this.state, this.config.manualRefresh.userCooldownMs, nowMs);
+
+        log('info', 'Manual refresh requested.', userKey ? { userId: userKey } : null);
+
+        const refreshPromise = this.runCheck('manual', { userId });
+        refreshPromise.catch((error) => {
+            log('error', 'Manual refresh failed.', error?.description || error?.message || String(error));
+        });
+    }
+}
+
+async function handleTelegramUpdate(update, runtime, publisher) {
+    const callbackQuery = update?.callback_query;
+    if (!callbackQuery || callbackQuery.data !== MANUAL_REFRESH_CALLBACK_DATA) {
+        return;
+    }
+
+    const callbackMessageId = callbackQuery?.message?.message_id || null;
+    if (!runtime.isCurrentMessage(callbackMessageId)) {
+        await publisher.answerCallbackQuery(callbackQuery.id, 'кнопка устарела');
+        return;
+    }
+
+    const refreshDecision = runtime.getManualRefreshDecision(callbackQuery.from?.id);
+    await publisher.answerCallbackQuery(callbackQuery.id, refreshDecision.message);
+
+    if (refreshDecision.accepted) {
+        runtime.startManualRefresh(callbackQuery.from?.id);
+    }
+}
+
+async function runTelegramCallbackLoop(runtime, publisher, state, persistState) {
+    log('info', 'Manual refresh button enabled. Listening for Telegram callback queries.');
+
+    while (true) {
+        try {
+            const updates = await publisher.getUpdates(state.telegramUpdateOffset || undefined);
+
+            for (const update of updates) {
+                try {
+                    await handleTelegramUpdate(update, runtime, publisher);
+                } catch (error) {
+                    log('warn', 'Failed to handle Telegram callback query.', error?.description || error?.message || String(error));
+                }
+
+                state.telegramUpdateOffset = update.update_id + 1;
+                await persistState();
+            }
+        } catch (error) {
+            log('warn', 'Telegram getUpdates failed.', error?.description || error?.message || String(error));
+            await sleep(runtime.config.manualRefresh.pollingErrorRetryMs);
+        }
+    }
+}
+
+async function runScheduledChecksLoop(runtime) {
+    while (true) {
+        if (!runtime.isRefreshing() && Date.now() >= runtime.nextScheduledRunAt) {
+            try {
+                await runtime.runCheck('scheduled');
+            } catch (error) {
+                log('error', 'Scheduled monitor iteration crashed.', error?.description || error?.message || String(error));
+            }
+            continue;
+        }
+
+        await sleep(1000);
+    }
+}
+
 async function collectIpResults(probeClient, config) {
     try {
         await probeClient.initialize();
@@ -545,7 +826,7 @@ function buildSummary(results, checkedAt = new Date()) {
     };
 }
 
-async function runMonitorIteration(probeClient, publisher, config, state) {
+async function runMonitorIteration(probeClient, publisher, config, state, persistState, trigger = 'scheduled') {
     const checkedAt = new Date();
     const results = await collectIpResults(probeClient, config);
     const summary = buildSummary(results, checkedAt);
@@ -555,9 +836,12 @@ async function runMonitorIteration(probeClient, publisher, config, state) {
 
     state.lastCheckedAt = summary.lastCheckedAt;
     state.lastCounts = summary.counts;
-    await saveJsonState(config.stateFilePath, state);
+    state.lastOverallStatus = summary.overallStatus;
+    state.lastCompletedTrigger = trigger;
+    await persistState();
 
-    log('info', `Monitor status: ${summary.overallStatus}.`, summary.counts);
+    log('info', `Monitor status (${trigger}): ${summary.overallStatus}.`, summary.counts);
+    return summary;
 }
 
 async function main() {
@@ -570,24 +854,32 @@ async function main() {
         lastImageStatus: savedState.lastImageStatus || null,
         lastCheckedAt: savedState.lastCheckedAt || null,
         lastCounts: savedState.lastCounts || null,
+        lastOverallStatus: savedState.lastOverallStatus || null,
+        lastCompletedTrigger: savedState.lastCompletedTrigger || null,
+        lastRunTrigger: savedState.lastRunTrigger || null,
+        lastRunStartedAtMs: normalizeTimestamp(savedState.lastRunStartedAtMs),
+        lastRunFinishedAtMs: normalizeTimestamp(savedState.lastRunFinishedAtMs),
+        lastManualRefreshAtMs: normalizeTimestamp(savedState.lastManualRefreshAtMs),
+        lastManualRefreshBy: savedState.lastManualRefreshBy || null,
+        telegramUpdateOffset: normalizeTimestamp(savedState.telegramUpdateOffset),
+        userCooldowns: normalizeUserCooldowns(savedState.userCooldowns),
     };
+    pruneExpiredUserCooldowns(state, config.manualRefresh.userCooldownMs);
+
+    const persistState = createStatePersister(config.stateFilePath, state);
 
     const probeClient = new GeminiIpProbeClient(config);
     const publisher = new TelegramStatusPublisher(config);
+    const runtime = new MonitorRuntime(config, state, probeClient, publisher, persistState);
 
-    while (true) {
-        const iterationStartedAt = Date.now();
+    await persistState();
 
-        try {
-            await runMonitorIteration(probeClient, publisher, config, state);
-        } catch (error) {
-            log('error', 'Monitor iteration crashed.', error?.description || error?.message || String(error));
-        }
-
-        const elapsedMs = Date.now() - iterationStartedAt;
-        const delayMs = Math.max(0, config.checkIntervalMs - elapsedMs);
-        await sleep(delayMs);
+    const backgroundTasks = [runScheduledChecksLoop(runtime)];
+    if (config.manualRefresh.enabled) {
+        backgroundTasks.push(runTelegramCallbackLoop(runtime, publisher, state, persistState));
     }
+
+    await Promise.all(backgroundTasks);
 }
 
 main().catch((error) => {
