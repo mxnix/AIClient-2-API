@@ -699,6 +699,11 @@ export class GeminiApiService {
                     const actualOptions = typeof options === 'function' ? undefined : options;
 
                     if (lookupHostname === hostname) {
+                        if (actualOptions?.all) {
+                            actualCallback(null, [{ address: fixedIp, family: 4 }]);
+                            return;
+                        }
+
                         actualCallback(null, fixedIp, 4);
                         return;
                     }

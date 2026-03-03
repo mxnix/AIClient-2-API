@@ -65,6 +65,23 @@ describe('Gemini fixed IP rotation helpers', () => {
 
         expect(classifyGeminiFixedIpError(error)).toMatchObject({ action: 'rotate' });
     });
+
+    test('returns an address array when Node requests lookup results with all=true', async () => {
+        const service = createService();
+        const agent = service._getFixedIpAgent('cloudcode-pa.googleapis.com', '1.1.1.1');
+
+        const addresses = await new Promise((resolve, reject) => {
+            agent.options.lookup('cloudcode-pa.googleapis.com', { all: true }, (error, result) => {
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                resolve(result);
+            });
+        });
+
+        expect(addresses).toEqual([{ address: '1.1.1.1', family: 4 }]);
+    });
 });
 
 describe('Gemini fixed IP rotation transport', () => {

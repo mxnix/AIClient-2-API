@@ -1,0 +1,15 @@
+services:
+  gemini-cli-telegram-monitor:
+    build:
+      context: ..
+      dockerfile: integrations/gemini-cli-telegram-monitor/Dockerfile
+    container_name: gemini-cli-telegram-monitor
+    restart: unless-stopped
+    env_file:
+      - ./gemini-cli-telegram-monitor/.env
+    volumes:
+      - ./gemini-cli-telegram-monitor/assets:/assets:ro
+      - ./gemini-cli-telegram-monitor/state:/data
+      - ../configs:/configs:ro
+      # Optional: mount external Gemini OAuth creds stored outside this repo. For example:
+      # - /config/gemini:/external-gemini:ro
