@@ -17,10 +17,4 @@ api-potluck-data.json
 # Codex credentials
 configs/codex/
 
-# Gemini Telegram monitor local runtime files
-docker/gemini-cli-telegram-monitor/.env
-docker/gemini-cli-telegram-monitor/assets/*
-!docker/gemini-cli-telegram-monitor/assets/.gitkeep
-docker/gemini-cli-telegram-monitor/state/*
-!docker/gemini-cli-telegram-monitor/state/.gitkeep
 

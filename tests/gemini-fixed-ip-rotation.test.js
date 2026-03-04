@@ -27,13 +27,14 @@ function createResponse(status, data, config = {}) {
     };
 }
 
-function createRequestOptions(url = 'https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist') {
+function createRequestOptions(url = 'https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist', model = undefined) {
     return {
         url: new URL(url),
         method: 'POST',
         headers: new Headers(),
         responseType: 'json',
         validateStatus: () => true,
+        _geminiModel: model,
     };
 }
 
@@ -96,6 +97,49 @@ describe('Gemini fixed IP rotation helpers', () => {
 
         expect(typeof prepared.adapter).toBe('function');
     });
+
+    test('tracks no-capacity cooldowns per model instead of globally per hostname', () => {
+        const service = createService();
+        service.fixedIpPreferredByHostname.set('cloudcode-pa.googleapis.com', '1.1.1.1');
+        service._markFixedIpCooldown(
+            'cloudcode-pa.googleapis.com',
+            '1.1.1.1',
+            '429-no-capacity',
+            'gemini-3.1-pro-preview',
+            60000
+        );
+
+        expect(service._getFixedIpCandidates('cloudcode-pa.googleapis.com', 'gemini-3.1-pro-preview'))
+            .toEqual(['2.2.2.2', '3.3.3.3']);
+        expect(service._getFixedIpCandidates('cloudcode-pa.googleapis.com', 'gemini-3-flash-preview'))
+            .toEqual(['1.1.1.1', '2.2.2.2', '3.3.3.3']);
+    });
+
+    test('prefers the last successful IP per model when one is known', () => {
+        const service = createService();
+        service.fixedIpPreferredByHostname.set('cloudcode-pa.googleapis.com', '1.1.1.1');
+        service._rememberSuccessfulFixedIp('cloudcode-pa.googleapis.com', '2.2.2.2', 'gemini-3.1-pro-preview');
+
+        expect(service._getFixedIpCandidates('cloudcode-pa.googleapis.com', 'gemini-3.1-pro-preview')[0]).toBe('2.2.2.2');
+        expect(service._getFixedIpCandidates('cloudcode-pa.googleapis.com', 'gemini-3-flash-preview')[0]).toBe('1.1.1.1');
+    });
+
+    test('returns no fixed-IP candidates while every candidate is on cooldown for a model', () => {
+        const service = createService();
+
+        for (const ip of service.fixedIpList) {
+            service._markFixedIpCooldown(
+                'cloudcode-pa.googleapis.com',
+                ip,
+                '429-no-capacity',
+                'gemini-3.1-pro-preview',
+                60000
+            );
+        }
+
+        expect(service._getFixedIpCandidates('cloudcode-pa.googleapis.com', 'gemini-3.1-pro-preview'))
+            .toEqual([]);
+    });
 });
 
 describe('Gemini fixed IP rotation transport', () => {
@@ -115,14 +159,14 @@ describe('Gemini fixed IP rotation transport', () => {
             return createResponse(200, { ok: true }, requestOptions);
         });
 
-        const response = await service._executeWithFixedIpRotation(createRequestOptions(), defaultAdapter);
+        const response = await service._executeWithFixedIpRotation(createRequestOptions(undefined, 'gemini-3.1-pro-preview'), defaultAdapter);
 
         expect(response.status).toBe(200);
         expect(seenIps).toEqual(['1.1.1.1', '2.2.2.2']);
-        expect(service.fixedIpPreferredByHostname.get('cloudcode-pa.googleapis.com')).toBe('2.2.2.2');
+        expect(service.fixedIpPreferredByModelHostname.get('cloudcode-pa.googleapis.com|gemini-3.1-pro-preview')).toBe('2.2.2.2');
     });
 
-    test('stops rotating once quota exhaustion is reached and keeps current retry flow intact', async () => {
+    test('stops rotating once quota exhaustion is reached on models without per-IP quota rotation', async () => {
         const service = createService();
         service.fixedIpPreferredByHostname.set('cloudcode-pa.googleapis.com', '2.2.2.2');
 
@@ -151,6 +195,32 @@ describe('Gemini fixed IP rotation transport', () => {
         expect(defaultAdapter.mock.calls[0][0]._geminiFixedIp).toBe('2.2.2.2');
     });
 
+    test('tries the next fixed IP after quota exhaustion for gemini-3.1-pro-preview', async () => {
+        const service = createService();
+        const seenIps = [];
+        const defaultAdapter = jest.fn(async (requestOptions) => {
+            seenIps.push(requestOptions._geminiFixedIp);
+            if (requestOptions._geminiFixedIp === '1.1.1.1') {
+                return createResponse(
+                    429,
+                    { error: { message: 'You have exhausted your capacity on this model. Your quota will reset after 18s.' } },
+                    requestOptions
+                );
+            }
+
+            return createResponse(200, { ok: true }, requestOptions);
+        });
+
+        const response = await service._executeWithFixedIpRotation(
+            createRequestOptions(undefined, 'gemini-3.1-pro-preview'),
+            defaultAdapter
+        );
+
+        expect(response.status).toBe(200);
+        expect(seenIps).toEqual(['1.1.1.1', '2.2.2.2']);
+        expect(service.fixedIpPreferredByModelHostname.get('cloudcode-pa.googleapis.com|gemini-3.1-pro-preview')).toBe('2.2.2.2');
+    });
+
     test('switches IPs after abort/network failures', async () => {
         const service = createService();
         const seenIps = [];
@@ -169,5 +239,131 @@ describe('Gemini fixed IP rotation transport', () => {
 
         expect(response.status).toBe(200);
         expect(seenIps).toEqual(['1.1.1.1', '2.2.2.2']);
+    });
+
+    test('falls back to default transport when every fixed IP is cooling down for the model', async () => {
+        const service = createService();
+        for (const ip of service.fixedIpList) {
+            service._markFixedIpCooldown(
+                'cloudcode-pa.googleapis.com',
+                ip,
+                '429-no-capacity',
+                'gemini-3.1-pro-preview',
+                60000
+            );
+        }
+
+        const defaultAdapter = jest.fn(async (requestOptions) => {
+            expect(requestOptions._geminiFixedIp).toBeUndefined();
+            return createResponse(200, { ok: true }, requestOptions);
+        });
+
+        const response = await service._executeWithFixedIpRotation(
+            createRequestOptions(undefined, 'gemini-3.1-pro-preview'),
+            defaultAdapter
+        );
+
+        expect(response.status).toBe(200);
+        expect(defaultAdapter).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('Gemini unary requests', () => {
+    test('uses generateContent for unary calls', async () => {
+        const service = createService();
+        service.projectId = 'project-id';
+        service.isExpiryDateNear = jest.fn(() => false);
+        service.callApi = jest.fn(async (method, payload) => {
+            expect(method).toBe('generateContent');
+            expect(payload).toMatchObject({
+                model: 'gemini-3-flash-preview',
+                project: 'project-id',
+                request: {
+                    contents: [{ role: 'user', parts: [{ text: 'Hi' }] }],
+                },
+            });
+
+            return {
+                response: {
+                    candidates: [{
+                        content: {
+                            role: 'model',
+                            parts: [{ text: 'Hello world' }],
+                        },
+                        finishReason: 'STOP',
+                    }],
+                    usageMetadata: {
+                        promptTokenCount: 1,
+                        candidatesTokenCount: 1,
+                        totalTokenCount: 2,
+                    },
+                },
+            };
+        });
+
+        const response = await service.generateContent('gemini-3-flash-preview', {
+            contents: [{ parts: [{ text: 'Hi' }] }],
+        });
+
+        expect(service.callApi).toHaveBeenCalledTimes(1);
+        expect(response).toMatchObject({
+            candidates: [{
+                content: {
+                    role: 'model',
+                    parts: [{ text: 'Hello world' }],
+                },
+                finishReason: 'STOP',
+            }],
+            usageMetadata: {
+                totalTokenCount: 2,
+            },
+        });
+    });
+
+    test('adds a GeminiCLI-style user agent to Code Assist requests', async () => {
+        const service = createService();
+        service.authClient.request = jest.fn(async () => ({ data: { ok: true } }));
+
+        await service.callApi('loadCodeAssist', { model: 'gemini-3-flash-preview' });
+
+        expect(service.authClient.request).toHaveBeenCalledTimes(1);
+        expect(service.authClient.request.mock.calls[0][0].headers['User-Agent'])
+            .toContain('GeminiCLI/');
+        expect(service.authClient.request.mock.calls[0][0].headers['User-Agent'])
+            .toContain('/gemini-3-flash-preview ');
+    });
+});
+
+describe('Gemini initialization', () => {
+    test('refreshes access token before project discovery when only refresh_token is loaded', async () => {
+        const service = createService({ PROJECT_ID: '' });
+        service.loadCredentials = jest.fn(async () => {
+            service.authClient.setCredentials({ refresh_token: 'refresh-token' });
+        });
+        service.initializeAuth = jest.fn(async () => {
+            service.authClient.setCredentials({
+                refresh_token: 'refresh-token',
+                access_token: 'access-token',
+            });
+        });
+        service.discoverProjectAndModels = jest.fn(async () => 'discovered-project');
+
+        await service.initialize();
+
+        expect(service.initializeAuth).toHaveBeenCalledWith(false);
+        expect(service.discoverProjectAndModels).toHaveBeenCalledTimes(1);
+        expect(service.projectId).toBe('discovered-project');
+    });
+
+    test('fails early with a clear error when project discovery has no OAuth credentials', async () => {
+        const service = createService({ PROJECT_ID: '' });
+        service.loadCredentials = jest.fn(async () => {});
+        service.discoverProjectAndModels = jest.fn();
+
+        await expect(service.initialize()).rejects.toThrow(
+            'Could not discover a valid Google Cloud Project ID because no Gemini OAuth credentials were loaded.'
+        );
+
+        expect(service.discoverProjectAndModels).not.toHaveBeenCalled();
     });
 });

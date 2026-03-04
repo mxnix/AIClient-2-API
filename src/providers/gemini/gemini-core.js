@@ -1,5 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
 import { GaxiosError } from 'gaxios';
+import { createHash, randomUUID } from 'crypto';
 import logger from '../../utils/logger.js';
 import * as http from 'http';
 import * as https from 'https';
@@ -42,6 +43,7 @@ const GEMINI_MODELS = getProviderModels(MODEL_PROVIDER.GEMINI_CLI);
 const DEFAULT_REQUEST_MAX_RETRIES = 10;
 const QUOTA_BACKOFF_JITTER_RATIO = 0.2;
 const MAX_TRANSIENT_ERROR_RETRIES = 2;
+const NO_CAPACITY_IP_COOLDOWN_MS = 5 * 60 * 1000;
 export const DEFAULT_GEMINI_FIXED_IPS = Object.freeze([
     '108.177.14.95',
     '142.250.150.95',
@@ -65,6 +67,15 @@ const RETRYABLE_ABORT_PATTERNS = [
     'aborterror',
     'request was aborted',
 ];
+
+function buildGeminiCliUserAgent(configuredUserAgent, model = 'unknown') {
+    if (typeof configuredUserAgent === 'string' && configuredUserAgent.trim()) {
+        return configuredUserAgent.trim();
+    }
+
+    const version = process.env.CLI_VERSION || 'compatible';
+    return `GeminiCLI/${version}/${model} (${process.platform}; ${process.arch})`;
+}
 
 function normalizeGeminiFixedIpList(rawValue) {
     if (rawValue === undefined || rawValue === null) {
@@ -142,6 +153,11 @@ function isGeminiQuotaExhaustedText(text) {
     return String(text || '').toLowerCase().includes('you have exhausted your capacity on this model');
 }
 
+function shouldRotateGeminiQuotaExhaustedFixedIp(model) {
+    const normalizedModel = normalizeProviderModel(MODEL_PROVIDER.GEMINI_CLI, model);
+    return normalizedModel === 'gemini-3.1-pro-preview';
+}
+
 function isRetryableAbortError(error) {
     const errorCode = String(error?.code || error?.cause?.name || '').toLowerCase();
     if (errorCode === 'aborterror') {
@@ -210,6 +226,15 @@ export function buildGeminiIpCandidateSequence(ipList, preferredIp = null) {
     }
 
     return uniqueIps;
+}
+
+function prioritizeGeminiIpCandidates(ipList, preferredIp = null, blockedIps = []) {
+    const blockedSet = new Set((blockedIps || []).map((ip) => String(ip || '').trim()).filter(Boolean));
+    const ordered = buildGeminiIpCandidateSequence(ipList, preferredIp);
+    if (blockedSet.size === 0) {
+        return ordered;
+    }
+    return ordered.filter((ip) => !blockedSet.has(ip));
 }
 
 function parseDurationToMs(rawDuration) {
@@ -436,6 +461,204 @@ function toGeminiApiResponse(codeAssistResponse) {
     return compliantResponse;
 }
 
+function convertGeminiStreamChunksToNonStream(chunks) {
+    let responseTemplate = null;
+    let traceId = '';
+    let finishReason = '';
+    let modelVersion = '';
+    let responseId = '';
+    let role = '';
+    let usageRaw = null;
+    const parts = [];
+
+    let pendingKind = '';
+    let pendingText = '';
+    let pendingThoughtSig = '';
+
+    const flushPending = () => {
+        if (!pendingKind) {
+            return;
+        }
+
+        if (pendingKind === 'text') {
+            if (pendingText) {
+                parts.push({ text: pendingText });
+            }
+        } else if (pendingKind === 'thought') {
+            if (pendingText || pendingThoughtSig) {
+                const thoughtPart = {
+                    thought: true,
+                    text: pendingText,
+                };
+                if (pendingThoughtSig) {
+                    thoughtPart.thoughtSignature = pendingThoughtSig;
+                }
+                parts.push(thoughtPart);
+            }
+        }
+
+        pendingKind = '';
+        pendingText = '';
+        pendingThoughtSig = '';
+    };
+
+    const normalizePart = (part) => {
+        const normalized = { ...part };
+        const thoughtSignature = normalized.thoughtSignature || normalized.thought_signature;
+        if (thoughtSignature) {
+            normalized.thoughtSignature = thoughtSignature;
+            delete normalized.thought_signature;
+        }
+        if (normalized.inline_data) {
+            normalized.inlineData = normalized.inline_data;
+            delete normalized.inline_data;
+        }
+        return normalized;
+    };
+
+    for (const chunk of chunks || []) {
+        const responseNode = chunk?.response;
+        if (!responseNode) {
+            continue;
+        }
+
+        responseTemplate = responseNode;
+
+        if (chunk.traceId) {
+            traceId = chunk.traceId;
+        }
+        if (responseNode.candidates?.[0]?.content?.role) {
+            role = responseNode.candidates[0].content.role;
+        }
+        if (responseNode.candidates?.[0]?.finishReason) {
+            finishReason = responseNode.candidates[0].finishReason;
+        }
+        if (responseNode.modelVersion) {
+            modelVersion = responseNode.modelVersion;
+        }
+        if (responseNode.responseId) {
+            responseId = responseNode.responseId;
+        }
+        if (responseNode.usageMetadata) {
+            usageRaw = responseNode.usageMetadata;
+        } else if (chunk.usageMetadata) {
+            usageRaw = chunk.usageMetadata;
+        }
+
+        const currentParts = responseNode.candidates?.[0]?.content?.parts;
+        if (!Array.isArray(currentParts)) {
+            continue;
+        }
+
+        for (const part of currentParts) {
+            const hasFunctionCall = part.functionCall !== undefined;
+            const hasInlineData = part.inlineData !== undefined || part.inline_data !== undefined;
+            const thoughtSignature = part.thoughtSignature || part.thought_signature || '';
+            const text = part.text || '';
+            const thought = part.thought || false;
+
+            if (hasFunctionCall || hasInlineData) {
+                flushPending();
+                parts.push(normalizePart(part));
+                continue;
+            }
+
+            if (thought || part.text !== undefined) {
+                const currentKind = thought ? 'thought' : 'text';
+                if (pendingKind && pendingKind !== currentKind) {
+                    flushPending();
+                }
+                pendingKind = currentKind;
+                pendingText += text;
+                if (currentKind === 'thought' && thoughtSignature) {
+                    pendingThoughtSig = thoughtSignature;
+                }
+                continue;
+            }
+
+            flushPending();
+            parts.push(normalizePart(part));
+        }
+    }
+
+    flushPending();
+
+    const result = responseTemplate
+        ? JSON.parse(JSON.stringify(responseTemplate))
+        : { candidates: [{ content: { role: 'model', parts: [] } }] };
+
+    if (!Array.isArray(result.candidates) || !result.candidates[0]) {
+        result.candidates = [{ content: { role: 'model', parts: [] } }];
+    }
+    if (!result.candidates[0].content) {
+        result.candidates[0].content = { role: 'model', parts: [] };
+    }
+
+    result.candidates[0].content.parts = parts;
+
+    if (role) {
+        result.candidates[0].content.role = role;
+    }
+    if (finishReason) {
+        result.candidates[0].finishReason = finishReason;
+    }
+    if (modelVersion) {
+        result.modelVersion = modelVersion;
+    }
+    if (responseId) {
+        result.responseId = responseId;
+    }
+    if (usageRaw) {
+        result.usageMetadata = usageRaw;
+    }
+
+    return {
+        response: result,
+        traceId,
+    };
+}
+
+function deriveGeminiSessionId(requestBody, fallbackSessionId) {
+    try {
+        const contents = requestBody?.contents;
+        if (Array.isArray(contents)) {
+            for (const content of contents) {
+                if (content?.role !== 'user' || !Array.isArray(content.parts)) {
+                    continue;
+                }
+
+                const text = content.parts
+                    .map((part) => typeof part?.text === 'string' ? part.text : '')
+                    .filter(Boolean)
+                    .join('\n');
+
+                if (!text) {
+                    continue;
+                }
+
+                const digest = createHash('sha256').update(text).digest('hex').slice(0, 24);
+                return `session-${digest}`;
+            }
+        }
+    } catch (_error) {
+        // Fall through to the fallback session id.
+    }
+
+    return fallbackSessionId || `session-${randomUUID()}`;
+}
+
+function buildGeminiPromptId(sessionId, externalRequestId, sequence) {
+    if (typeof externalRequestId === 'string' && externalRequestId.trim()) {
+        return `${sessionId}########${externalRequestId.trim()}`;
+    }
+
+    if (Number.isFinite(sequence) && sequence > 0) {
+        return `${sessionId}########${sequence}`;
+    }
+
+    return `${sessionId}########${Date.now()}`;
+}
+
 /**
  * Ensures that all content parts in a request body have a 'role' property.
  * If 'systemInstruction' is present and lacks a role, it defaults to 'user'.
@@ -499,14 +722,11 @@ function ensureRolesInContents(requestBody) {
 async function* apply_anti_truncation_to_stream(service, model, requestBody) {
     let currentRequest = { ...requestBody };
     let allGeneratedText = '';
+    const baseMonitorRequestId = service.config?._monitorRequestId || null;
 
     while (true) {
         // 发送请求并处理流式响应
-        const apiRequest = {
-            model: model,
-            project: service.projectId,
-            request: currentRequest
-        };
+        const apiRequest = service._buildCodeAssistGenerateRequest(model, currentRequest, baseMonitorRequestId);
         const stream = service.streamApi(API_ACTIONS.STREAM_GENERATE_CONTENT, apiRequest);
 
         let lastChunk = null;
@@ -581,10 +801,14 @@ export class GeminiApiService {
         this.proxyConfig = getProxyConfigForProvider(config, 'gemini-cli-oauth');
         this.fixedIpList = normalizeGeminiFixedIpList(config.GEMINI_FIXED_IPS);
         this.fixedIpPreferredByHostname = new Map();
+        this.fixedIpPreferredByModelHostname = new Map();
+        this.fixedIpCooldownByModelHostname = new Map();
         this.fixedIpAgentCache = new Map();
         this.fixedIpTargetHostnames = new Set();
         this.availableModels = [];
         this.isInitialized = false;
+        this.defaultSessionId = `session-${randomUUID()}`;
+        this.promptSequence = 0;
 
         const codeAssistHostname = extractHostnameFromUrl(this.codeAssistEndpoint);
         if (codeAssistHostname) {
@@ -614,6 +838,31 @@ export class GeminiApiService {
 
         this.authClient = new OAuth2Client(oauth2Options);
         this._installFixedIpTransportAdapter();
+    }
+
+    _nextPromptSequence() {
+        this.promptSequence += 1;
+        return this.promptSequence;
+    }
+
+    _buildCodeAssistGenerateRequest(model, requestBody, monitorRequestId = null) {
+        const sessionId = deriveGeminiSessionId(requestBody, this.defaultSessionId);
+        const promptId = buildGeminiPromptId(sessionId, monitorRequestId, this._nextPromptSequence());
+        const request = {
+            ...requestBody,
+            session_id: requestBody?.session_id || requestBody?.sessionId || sessionId,
+        };
+
+        delete request.sessionId;
+
+        logger.info(`[Gemini API] Prepared Code Assist identifiers | session_id=${request.session_id} | user_prompt_id=${promptId}`);
+
+        return {
+            model,
+            project: this.projectId,
+            user_prompt_id: promptId,
+            request,
+        };
     }
 
     _installFixedIpTransportAdapter() {
@@ -660,12 +909,74 @@ export class GeminiApiService {
         return this.fixedIpTargetHostnames.has(hostname);
     }
 
-    _getFixedIpCandidates(hostname) {
-        return buildGeminiIpCandidateSequence(this.fixedIpList, this.fixedIpPreferredByHostname.get(hostname));
+    _buildFixedIpModelKey(hostname, model = null) {
+        const normalizedHostname = String(hostname || '').trim();
+        if (!normalizedHostname) {
+            return null;
+        }
+
+        const normalizedModel = typeof model === 'string' ? model.trim() : '';
+        return normalizedModel ? `${normalizedHostname}|${normalizedModel}` : normalizedHostname;
     }
 
-    _rememberSuccessfulFixedIp(hostname, fixedIp) {
+    _buildFixedIpCooldownKey(hostname, model = null, fixedIp = null) {
+        const modelKey = this._buildFixedIpModelKey(hostname, model);
+        const normalizedIp = String(fixedIp || '').trim();
+        if (!modelKey || !normalizedIp) {
+            return null;
+        }
+
+        return `${modelKey}|${normalizedIp}`;
+    }
+
+    _getBlockedFixedIps(hostname, model = null) {
+        const blockedIps = [];
+        const now = Date.now();
+
+        for (const ip of this.fixedIpList) {
+            const cooldownKey = this._buildFixedIpCooldownKey(hostname, model, ip);
+            if (!cooldownKey) {
+                continue;
+            }
+
+            const blockedUntil = this.fixedIpCooldownByModelHostname.get(cooldownKey);
+            if (!Number.isFinite(blockedUntil) || blockedUntil <= now) {
+                this.fixedIpCooldownByModelHostname.delete(cooldownKey);
+                continue;
+            }
+
+            blockedIps.push(ip);
+        }
+
+        return blockedIps;
+    }
+
+    _getFixedIpCandidates(hostname, model = null) {
+        const modelKey = this._buildFixedIpModelKey(hostname, model);
+        const preferredIp = modelKey
+            ? this.fixedIpPreferredByModelHostname.get(modelKey) || this.fixedIpPreferredByHostname.get(hostname)
+            : this.fixedIpPreferredByHostname.get(hostname);
+        const blockedIps = this._getBlockedFixedIps(hostname, model);
+        return prioritizeGeminiIpCandidates(this.fixedIpList, preferredIp, blockedIps);
+    }
+
+    _rememberSuccessfulFixedIp(hostname, fixedIp, model = null) {
         if (!hostname || !fixedIp) {
+            return;
+        }
+
+        const modelKey = this._buildFixedIpModelKey(hostname, model);
+        if (modelKey && model) {
+            const previousIp = this.fixedIpPreferredByModelHostname.get(modelKey);
+            this.fixedIpPreferredByModelHostname.set(modelKey, fixedIp);
+            const cooldownKey = this._buildFixedIpCooldownKey(hostname, model, fixedIp);
+            if (cooldownKey) {
+                this.fixedIpCooldownByModelHostname.delete(cooldownKey);
+            }
+
+            if (previousIp !== fixedIp) {
+                logger.info(`[Gemini IP] Cached fixed IP ${fixedIp} for ${hostname} on model ${model}.`);
+            }
             return;
         }
 
@@ -677,14 +988,35 @@ export class GeminiApiService {
         }
     }
 
-    _clearPreferredFixedIp(hostname, fixedIp, reason) {
+    _clearPreferredFixedIp(hostname, fixedIp, reason, model = null) {
         if (!hostname || !fixedIp) {
+            return;
+        }
+
+        const modelKey = this._buildFixedIpModelKey(hostname, model);
+        if (modelKey && model && this.fixedIpPreferredByModelHostname.get(modelKey) === fixedIp) {
+            this.fixedIpPreferredByModelHostname.delete(modelKey);
+            logger.info(`[Gemini IP] Cleared cached fixed IP ${fixedIp} for ${hostname} on model ${model} after ${reason}.`);
             return;
         }
 
         if (this.fixedIpPreferredByHostname.get(hostname) === fixedIp) {
             this.fixedIpPreferredByHostname.delete(hostname);
             logger.info(`[Gemini IP] Cleared cached fixed IP ${fixedIp} for ${hostname} after ${reason}.`);
+        }
+    }
+
+    _markFixedIpCooldown(hostname, fixedIp, reason, model = null, cooldownMs = NO_CAPACITY_IP_COOLDOWN_MS) {
+        const cooldownKey = this._buildFixedIpCooldownKey(hostname, model, fixedIp);
+        if (!cooldownKey || !Number.isFinite(cooldownMs) || cooldownMs <= 0) {
+            return;
+        }
+
+        const blockedUntil = Date.now() + cooldownMs;
+        this.fixedIpCooldownByModelHostname.set(cooldownKey, blockedUntil);
+
+        if (model) {
+            logger.info(`[Gemini IP] Marked fixed IP ${fixedIp} as temporarily unavailable for ${hostname} on model ${model} after ${reason} (${cooldownMs}ms).`);
         }
     }
 
@@ -795,8 +1127,13 @@ export class GeminiApiService {
         }
 
         const hostname = extractHostnameFromUrl(requestOptions?.url);
-        const candidateIps = this._getFixedIpCandidates(hostname);
+        const model = typeof requestOptions?._geminiModel === 'string' && requestOptions._geminiModel.trim()
+            ? requestOptions._geminiModel.trim()
+            : null;
+        const candidateIps = this._getFixedIpCandidates(hostname, model);
         if (candidateIps.length === 0) {
+            const modelSuffix = model ? ` for model ${model}` : '';
+            logger.info(`[Gemini IP] All fixed IP candidates for ${hostname}${modelSuffix} are currently on cooldown. Falling back to default DNS/transport.`);
             return defaultAdapter(requestOptions);
         }
 
@@ -811,26 +1148,47 @@ export class GeminiApiService {
                 const response = await defaultAdapter(attemptOptions);
 
                 if (response.status >= 200 && response.status < 300) {
-                    this._rememberSuccessfulFixedIp(hostname, fixedIp);
-                    logger.info(`[Gemini IP] ${hostname} request succeeded via fixed IP ${fixedIp}.`);
+                    this._rememberSuccessfulFixedIp(hostname, fixedIp, model);
+                    if (model) {
+                        logger.info(`[Gemini IP] ${hostname} request for model ${model} succeeded via fixed IP ${fixedIp}.`);
+                    } else {
+                        logger.info(`[Gemini IP] ${hostname} request succeeded via fixed IP ${fixedIp}.`);
+                    }
                     return response;
                 }
 
                 await this._hydrateErrorResponseBody(response);
                 const decision = classifyGeminiFixedIpResponse(response);
                 const hasNextIp = attemptIndex < candidateIps.length - 1;
+                const rotateQuotaExhausted = decision.reason === '429-quota-exhausted' &&
+                    hasNextIp &&
+                    shouldRotateGeminiQuotaExhaustedFixedIp(model);
+
+                if (decision.reason === '429-no-capacity') {
+                    this._markFixedIpCooldown(hostname, fixedIp, decision.reason, model);
+                }
+
+                if (rotateQuotaExhausted) {
+                    this._clearPreferredFixedIp(hostname, fixedIp, decision.reason, model);
+                    logger.warn(`[Gemini IP] ${hostname} fixed IP ${fixedIp} returned quota exhaustion for model ${model}. Trying the next fixed IP (${attemptIndex + 2}/${candidateIps.length}) before falling back to the project's retry/quota handling.`);
+                    lastResponseError = this._createFixedIpResponseError(attemptOptions, response);
+                    continue;
+                }
 
                 if (decision.action === 'rotate' && hasNextIp) {
-                    this._clearPreferredFixedIp(hostname, fixedIp, decision.reason);
-                    logger.warn(`[Gemini IP] ${hostname} returned ${response.status} via fixed IP ${fixedIp} (${decision.reason}). Switching to next fixed IP (${attemptIndex + 2}/${candidateIps.length}).`);
+                    this._clearPreferredFixedIp(hostname, fixedIp, decision.reason, model);
+                    const modelSuffix = model ? ` for model ${model}` : '';
+                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} returned ${response.status} via fixed IP ${fixedIp} (${decision.reason}). Switching to next fixed IP (${attemptIndex + 2}/${candidateIps.length}).`);
                     lastResponseError = this._createFixedIpResponseError(attemptOptions, response);
                     continue;
                 }
 
                 if (decision.reason === '429-quota-exhausted') {
-                    logger.info(`[Gemini IP] ${hostname} fixed IP ${fixedIp} returned quota exhaustion. Falling back to the project's existing retry/quota handling.`);
+                    const modelSuffix = model ? ` for model ${model}` : '';
+                    logger.info(`[Gemini IP] ${hostname}${modelSuffix} fixed IP ${fixedIp} returned quota exhaustion. Falling back to the project's existing retry/quota handling.`);
                 } else if (decision.action === 'rotate') {
-                    logger.warn(`[Gemini IP] ${hostname} still returned ${response.status} via fixed IP ${fixedIp} after exhausting fixed IP candidates.`);
+                    const modelSuffix = model ? ` for model ${model}` : '';
+                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} still returned ${response.status} via fixed IP ${fixedIp} after exhausting fixed IP candidates.`);
                 }
 
                 throw this._createFixedIpResponseError(attemptOptions, response);
@@ -843,14 +1201,16 @@ export class GeminiApiService {
                 const hasNextIp = attemptIndex < candidateIps.length - 1;
 
                 if (decision.action === 'rotate' && hasNextIp) {
-                    this._clearPreferredFixedIp(hostname, fixedIp, decision.reason);
-                    logger.warn(`[Gemini IP] ${hostname} transport failed via fixed IP ${fixedIp} (${decision.reason}). Switching to next fixed IP (${attemptIndex + 2}/${candidateIps.length}).`);
+                    this._clearPreferredFixedIp(hostname, fixedIp, decision.reason, model);
+                    const modelSuffix = model ? ` for model ${model}` : '';
+                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} transport failed via fixed IP ${fixedIp} (${decision.reason}). Switching to next fixed IP (${attemptIndex + 2}/${candidateIps.length}).`);
                     lastTransportError = error;
                     continue;
                 }
 
                 if (decision.action === 'rotate') {
-                    logger.warn(`[Gemini IP] ${hostname} transport still failed via fixed IP ${fixedIp} (${decision.reason}) and no fixed IP candidates remain.`);
+                    const modelSuffix = model ? ` for model ${model}` : '';
+                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} transport still failed via fixed IP ${fixedIp} (${decision.reason}) and no fixed IP candidates remain.`);
                 }
 
                 throw error;
@@ -876,6 +1236,15 @@ export class GeminiApiService {
         await this.loadCredentials();
 
         if (!this.projectId) {
+            if (!this.authClient.credentials.access_token && this.authClient.credentials.refresh_token) {
+                logger.info('[Gemini Auth] Access token is missing before project discovery. Refreshing from stored refresh token...');
+                await this.initializeAuth(false);
+            }
+
+            if (!this.authClient.credentials.access_token && !this.authClient.credentials.refresh_token) {
+                throw new Error('Could not discover a valid Google Cloud Project ID because no Gemini OAuth credentials were loaded. Configure PROJECT_ID explicitly or provide valid OAuth credentials.');
+            }
+
             this.projectId = await this.discoverProjectAndModels();
         } else {
             logger.info(`[Gemini] Using provided Project ID: ${this.projectId}`);
@@ -1116,9 +1485,13 @@ export class GeminiApiService {
             const requestOptions = {
                 url: `${this.codeAssistEndpoint}/${this.apiVersion}:${method}`,
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "User-Agent": buildGeminiCliUserAgent(this.config.GEMINI_USER_AGENT, body?.model),
+                },
                 responseType: "json",
                 body: JSON.stringify(body),
+                _geminiModel: body?.model,
             };
             const res = await this.authClient.request(requestOptions);
             return res.data;
@@ -1217,9 +1590,13 @@ export class GeminiApiService {
                 url: `${this.codeAssistEndpoint}/${this.apiVersion}:${method}`,
                 method: "POST",
                 params: { alt: "sse" },
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "User-Agent": buildGeminiCliUserAgent(this.config.GEMINI_USER_AGENT, body?.model),
+                },
                 responseType: "stream",
                 body: JSON.stringify(body),
+                _geminiModel: body?.model,
             };
             const res = await this.authClient.request(requestOptions);
             if (res.status !== 200) {
@@ -1329,9 +1706,11 @@ export class GeminiApiService {
 
     async generateContent(model, requestBody) {
         logger.info(`[Auth Token] Time until expiry: ${formatExpiryTime(this.authClient.credentials.expiry_date)}`);
-        
+
+        let monitorRequestId = null;
         // 临时存储 monitorRequestId
         if (requestBody._monitorRequestId) {
+            monitorRequestId = requestBody._monitorRequestId;
             this.config._monitorRequestId = requestBody._monitorRequestId;
             delete requestBody._monitorRequestId;
         }
@@ -1363,8 +1742,10 @@ export class GeminiApiService {
     async * generateContentStream(model, requestBody) {
         logger.info(`[Auth Token] Time until expiry: ${formatExpiryTime(this.authClient.credentials.expiry_date)}`);
 
+        let monitorRequestId = null;
         // 临时存储 monitorRequestId
         if (requestBody._monitorRequestId) {
+            monitorRequestId = requestBody._monitorRequestId;
             this.config._monitorRequestId = requestBody._monitorRequestId;
             delete requestBody._monitorRequestId;
         }
@@ -1405,7 +1786,7 @@ export class GeminiApiService {
                 logger.info(`[Gemini] Model normalized: '${model}' -> '${selectedModel}'`);
             }
             const processedRequestBody = ensureRolesInContents(requestBody);
-            const apiRequest = { model: selectedModel, project: this.projectId, request: processedRequestBody };
+            const apiRequest = this._buildCodeAssistGenerateRequest(selectedModel, processedRequestBody, monitorRequestId);
             const stream = this.streamApi(API_ACTIONS.STREAM_GENERATE_CONTENT, apiRequest);
             for await (const chunk of stream) {
                 yield toGeminiApiResponse(chunk.response);

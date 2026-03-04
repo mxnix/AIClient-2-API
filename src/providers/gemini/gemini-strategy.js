@@ -20,7 +20,11 @@ class GeminiStrategy extends ProviderStrategy {
         if (response.candidates && response.candidates.length > 0) {
             const candidate = response.candidates[0];
             if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
-                return candidate.content.parts.map(part => part.text).join('');
+                return candidate.content.parts
+                    .filter(part => part && part.thought !== true)
+                    .map(part => part.text)
+                    .filter(Boolean)
+                    .join('');
             }
         }
         return '';

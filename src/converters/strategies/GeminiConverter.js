@@ -284,7 +284,8 @@ export class GeminiConverter extends BaseConverter {
      * Gemini响应 -> OpenAI响应
      */
     toOpenAIResponse(geminiResponse, model) {
-        let content = this.processGeminiResponseContent(geminiResponse);
+        const { content: responseContent, reasoningContent } = this.processGeminiResponseContent(geminiResponse);
+        let content = responseContent;
         
         // 提取 tool_calls
         const toolCalls = [];
@@ -326,6 +327,10 @@ export class GeminiConverter extends BaseConverter {
             role: "assistant",
             content: content
         };
+
+        if (reasoningContent) {
+            message.reasoning_content = reasoningContent;
+        }
         
         // 只有在有 tool_calls 时才添加该字段
         if (toolCalls.length > 0) {
@@ -378,12 +383,19 @@ export class GeminiConverter extends BaseConverter {
         if (!candidate) return null;
 
         let content = '';
+        let reasoningContent = '';
         const toolCalls = [];
         
         // 从parts中提取文本和tool calls
         const parts = candidate.content?.parts;
         if (parts && Array.isArray(parts)) {
             for (const part of parts) {
+                if (part.thought === true) {
+                    if (part.text) {
+                        reasoningContent += part.text;
+                    }
+                    continue;
+                }
                 if (part.text) {
                     content += part.text;
                 }
@@ -437,6 +449,7 @@ export class GeminiConverter extends BaseConverter {
         // 构建delta对象
         const delta = {};
         if (content) delta.content = content;
+        if (reasoningContent) delta.reasoning_content = reasoningContent;
         if (toolCalls.length > 0) delta.tool_calls = toolCalls;
 
         // Don't return empty delta chunks
@@ -523,6 +536,7 @@ export class GeminiConverter extends BaseConverter {
         
         parts.forEach(part => {
             if (!part) return;
+            if (part.thought === true) return;
             
             if (typeof part.text === 'string') {
                 contentArray.push({
@@ -572,21 +586,31 @@ export class GeminiConverter extends BaseConverter {
      * 处理Gemini响应内容
      */
     processGeminiResponseContent(geminiResponse) {
-        if (!geminiResponse || !geminiResponse.candidates) return '';
-        
+        if (!geminiResponse || !geminiResponse.candidates) {
+            return { content: '', reasoningContent: '' };
+        }
+
         const contents = [];
+        const reasoning = [];
         
         geminiResponse.candidates.forEach(candidate => {
             if (candidate.content && candidate.content.parts) {
                 candidate.content.parts.forEach(part => {
                     if (part.text) {
-                        contents.push(part.text);
+                        if (part.thought === true) {
+                            reasoning.push(part.text);
+                        } else {
+                            contents.push(part.text);
+                        }
                     }
                 });
             }
         });
         
-        return contents.join('\n');
+        return {
+            content: contents.join('\n'),
+            reasoningContent: reasoning.join('\n')
+        };
     }
 
     // =========================================================================
@@ -1203,10 +1227,20 @@ export class GeminiConverter extends BaseConverter {
      * Gemini响应 -> OpenAI Responses响应
      */
     toOpenAIResponsesResponse(geminiResponse, model) {
-        const content = this.processGeminiResponseContent(geminiResponse);
-        const textContent = typeof content === 'string' ? content : JSON.stringify(content);
+        const { content: textContent, reasoningContent } = this.processGeminiResponseContent(geminiResponse);
 
         let output = [];
+        if (reasoningContent) {
+            output.push({
+                id: `rs_${uuidv4().replace(/-/g, '')}`,
+                type: "reasoning",
+                summary: [{
+                    type: "summary_text",
+                    text: reasoningContent
+                }]
+            });
+        }
+
         output.push({
             id: `msg_${uuidv4().replace(/-/g, '')}`,
             summary: [],
@@ -1216,7 +1250,7 @@ export class GeminiConverter extends BaseConverter {
             content: [{
                 annotations: [],
                 logprobs: [],
-                text: textContent,
+                text: textContent || "",
                 type: "output_text"
             }]
         });
@@ -1297,7 +1331,19 @@ export class GeminiConverter extends BaseConverter {
                 
                 // 提取文本内容
                 if (parts && Array.isArray(parts)) {
-                    const textParts = parts.filter(part => part && typeof part.text === 'string');
+                    const reasoningParts = parts.filter(part => part?.thought === true && typeof part.text === 'string');
+                    if (reasoningParts.length > 0) {
+                        const reasoningText = reasoningParts.map(part => part.text).join('');
+                        events.push({
+                            delta: reasoningText,
+                            item_id: `thinking_${uuidv4().replace(/-/g, '')}`,
+                            output_index: 0,
+                            sequence_number: 3,
+                            type: "response.reasoning_summary_text.delta"
+                        });
+                    }
+
+                    const textParts = parts.filter(part => part?.thought !== true && typeof part.text === 'string');
                     if (textParts.length > 0) {
                         const text = textParts.map(part => part.text).join('');
                         events.push({

@@ -18,7 +18,6 @@ import {
     CLAUDE_DEFAULT_MAX_TOKENS,
     CLAUDE_DEFAULT_TEMPERATURE,
     CLAUDE_DEFAULT_TOP_P,
-    GEMINI_DEFAULT_MAX_TOKENS,
     GEMINI_DEFAULT_TEMPERATURE,
     GEMINI_DEFAULT_TOP_P,
     OPENAI_DEFAULT_INPUT_TOKEN_LIMIT,
@@ -35,6 +34,8 @@ import {
     generateOutputItemDone,
     generateResponseCompleted
 } from '../../providers/openai/openai-responses-core.mjs';
+
+const GEMINI_3_DEFAULT_TOP_K = 64;
 
 /**
  * OpenAI转换器类
@@ -1139,7 +1140,6 @@ export class OpenAIConverter extends BaseConverter {
             { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "OFF" }
         ];
     }
-
     /**
      * 处理OpenAI内容到Gemini parts
      */
@@ -1197,8 +1197,14 @@ export class OpenAIConverter extends BaseConverter {
     buildGeminiGenerationConfig({ temperature, max_tokens, top_p, stop, tools, response_format }, model) {
         const config = {};
         config.temperature = checkAndAssignOrDefault(temperature, GEMINI_DEFAULT_TEMPERATURE);
-        config.maxOutputTokens = checkAndAssignOrDefault(max_tokens, GEMINI_DEFAULT_MAX_TOKENS);
+        if (max_tokens !== undefined && max_tokens !== null) {
+            // Avoid reserving an oversized output budget unless the client explicitly requested it.
+            config.maxOutputTokens = max_tokens;
+        }
         config.topP = checkAndAssignOrDefault(top_p, GEMINI_DEFAULT_TOP_P);
+        if (this.isGemini3Model(model)) {
+            config.topK = GEMINI_3_DEFAULT_TOP_K;
+        }
         if (stop !== undefined) config.stopSequences = Array.isArray(stop) ? stop : [stop];
 
         // Handle response_format
