@@ -1,6 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
 import { GaxiosError } from 'gaxios';
-import { createHash, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import logger from '../../utils/logger.js';
 import * as http from 'http';
 import * as https from 'https';
@@ -618,33 +618,25 @@ function convertGeminiStreamChunksToNonStream(chunks) {
     };
 }
 
-function deriveGeminiSessionId(requestBody, fallbackSessionId) {
-    try {
-        const contents = requestBody?.contents;
-        if (Array.isArray(contents)) {
-            for (const content of contents) {
-                if (content?.role !== 'user' || !Array.isArray(content.parts)) {
-                    continue;
-                }
-
-                const text = content.parts
-                    .map((part) => typeof part?.text === 'string' ? part.text : '')
-                    .filter(Boolean)
-                    .join('\n');
-
-                if (!text) {
-                    continue;
-                }
-
-                const digest = createHash('sha256').update(text).digest('hex').slice(0, 24);
-                return `session-${digest}`;
-            }
-        }
-    } catch (_error) {
-        // Fall through to the fallback session id.
+function deriveGeminiSessionId(requestBody) {
+    const existingSessionId = requestBody?.session_id || requestBody?.sessionId;
+    if (typeof existingSessionId === 'string' && existingSessionId.trim()) {
+        return existingSessionId.trim();
     }
 
-    return fallbackSessionId || `session-${randomUUID()}`;
+    return `session-${randomUUID()}`;
+}
+
+function ensureGeminiSessionId(requestBody) {
+    if (!requestBody || typeof requestBody !== 'object') {
+        return null;
+    }
+
+    const sessionId = deriveGeminiSessionId(requestBody);
+    requestBody.session_id = sessionId;
+    delete requestBody.sessionId;
+
+    return sessionId;
 }
 
 function buildGeminiPromptId(sessionId, externalRequestId, sequence) {
@@ -763,7 +755,7 @@ async function* apply_anti_truncation_to_stream(service, model, requestBody) {
                     // 添加之前生成的内容作为模型响应
                     newContents.push({
                         role: 'model',
-                        parts: [{ text: currentGeneratedText }]
+                        parts: [{ text: allGeneratedText }]
                     });
 
                     // 添加继续生成的指令
@@ -774,6 +766,7 @@ async function* apply_anti_truncation_to_stream(service, model, requestBody) {
 
                     currentRequest = {
                         ...requestBody,
+                        session_id: currentRequest.session_id || requestBody.session_id || requestBody.sessionId,
                         contents: newContents
                     };
 
@@ -807,7 +800,6 @@ export class GeminiApiService {
         this.fixedIpTargetHostnames = new Set();
         this.availableModels = [];
         this.isInitialized = false;
-        this.defaultSessionId = `session-${randomUUID()}`;
         this.promptSequence = 0;
 
         const codeAssistHostname = extractHostnameFromUrl(this.codeAssistEndpoint);
@@ -846,11 +838,11 @@ export class GeminiApiService {
     }
 
     _buildCodeAssistGenerateRequest(model, requestBody, monitorRequestId = null) {
-        const sessionId = deriveGeminiSessionId(requestBody, this.defaultSessionId);
+        const sessionId = deriveGeminiSessionId(requestBody);
         const promptId = buildGeminiPromptId(sessionId, monitorRequestId, this._nextPromptSequence());
         const request = {
             ...requestBody,
-            session_id: requestBody?.session_id || requestBody?.sessionId || sessionId,
+            session_id: sessionId,
         };
 
         delete request.sessionId;
@@ -1734,6 +1726,7 @@ export class GeminiApiService {
             logger.info(`[Gemini] Model normalized: '${model}' -> '${selectedModel}'`);
         }
         const processedRequestBody = ensureRolesInContents(requestBody);
+        ensureGeminiSessionId(processedRequestBody);
         const apiRequest = { model: selectedModel, project: this.projectId, request: processedRequestBody };
         const response = await this.callApi(API_ACTIONS.GENERATE_CONTENT, apiRequest);
         return toGeminiApiResponse(response.response);
@@ -1773,6 +1766,7 @@ export class GeminiApiService {
             }
             // 使用防截断流处理
             const processedRequestBody = ensureRolesInContents(requestBody);
+            ensureGeminiSessionId(processedRequestBody);
             yield* apply_anti_truncation_to_stream(this, actualModel, processedRequestBody);
         } else {
             if (typeof model === 'string' && model.startsWith('anti-')) {
@@ -1786,6 +1780,7 @@ export class GeminiApiService {
                 logger.info(`[Gemini] Model normalized: '${model}' -> '${selectedModel}'`);
             }
             const processedRequestBody = ensureRolesInContents(requestBody);
+            ensureGeminiSessionId(processedRequestBody);
             const apiRequest = this._buildCodeAssistGenerateRequest(selectedModel, processedRequestBody, monitorRequestId);
             const stream = this.streamApi(API_ACTIONS.STREAM_GENERATE_CONTENT, apiRequest);
             for await (const chunk of stream) {

@@ -332,6 +332,165 @@ describe('Gemini unary requests', () => {
         expect(service.authClient.request.mock.calls[0][0].headers['User-Agent'])
             .toContain('/gemini-3-flash-preview ');
     });
+
+    test('assigns unique session IDs to unary requests with identical user text', async () => {
+        const service = createService();
+        const sessionIds = [];
+        service.projectId = 'project-id';
+        service.isExpiryDateNear = jest.fn(() => false);
+        service.callApi = jest.fn(async (_method, payload) => {
+            sessionIds.push(payload.request.session_id);
+            return {
+                response: {
+                    candidates: [{
+                        content: {
+                            role: 'model',
+                            parts: [{ text: 'ok' }],
+                        },
+                        finishReason: 'STOP',
+                    }],
+                },
+            };
+        });
+
+        await service.generateContent('gemini-3-flash-preview', {
+            contents: [{ parts: [{ text: 'hello' }] }],
+        });
+        await service.generateContent('gemini-3-flash-preview', {
+            contents: [{ parts: [{ text: 'hello' }] }],
+        });
+
+        expect(sessionIds).toHaveLength(2);
+        expect(sessionIds[0]).toMatch(/^session-/);
+        expect(sessionIds[1]).toMatch(/^session-/);
+        expect(sessionIds[0]).not.toBe(sessionIds[1]);
+    });
+
+    test('assigns unique session IDs to image-only unary requests', async () => {
+        const service = createService();
+        const sessionIds = [];
+        service.projectId = 'project-id';
+        service.isExpiryDateNear = jest.fn(() => false);
+        service.callApi = jest.fn(async (_method, payload) => {
+            sessionIds.push(payload.request.session_id);
+            return {
+                response: {
+                    candidates: [{
+                        content: {
+                            role: 'model',
+                            parts: [{ text: 'ok' }],
+                        },
+                        finishReason: 'STOP',
+                    }],
+                },
+            };
+        });
+
+        await service.generateContent('gemini-3-flash-preview', {
+            contents: [{
+                parts: [{
+                    inlineData: {
+                        mimeType: 'image/png',
+                        data: 'aGVsbG8=',
+                    },
+                }],
+            }],
+        });
+        await service.generateContent('gemini-3-flash-preview', {
+            contents: [{
+                parts: [{
+                    inlineData: {
+                        mimeType: 'image/png',
+                        data: 'aGVsbG8=',
+                    },
+                }],
+            }],
+        });
+
+        expect(sessionIds).toHaveLength(2);
+        expect(sessionIds[0]).toMatch(/^session-/);
+        expect(sessionIds[1]).toMatch(/^session-/);
+        expect(sessionIds[0]).not.toBe(sessionIds[1]);
+    });
+});
+
+describe('Gemini anti-truncation', () => {
+    test('preserves the same session and accumulates continuation text across retries', async () => {
+        const service = createService();
+        const seenRequests = [];
+        service.projectId = 'project-id';
+        service.isExpiryDateNear = jest.fn(() => false);
+        service.streamApi = jest.fn((_method, apiRequest) => {
+            seenRequests.push(apiRequest);
+            const iteration = seenRequests.length;
+            const chunksByIteration = [
+                [{
+                    response: {
+                        candidates: [{
+                            content: {
+                                role: 'model',
+                                parts: [{ text: 'Hello ' }],
+                            },
+                            finishReason: 'MAX_TOKENS',
+                        }],
+                    },
+                }],
+                [{
+                    response: {
+                        candidates: [{
+                            content: {
+                                role: 'model',
+                                parts: [{ text: 'world' }],
+                            },
+                            finishReason: 'MAX_TOKENS',
+                        }],
+                    },
+                }],
+                [{
+                    response: {
+                        candidates: [{
+                            content: {
+                                role: 'model',
+                                parts: [{ text: '!' }],
+                            },
+                            finishReason: 'STOP',
+                        }],
+                    },
+                }],
+            ];
+
+            return (async function* () {
+                for (const chunk of chunksByIteration[iteration - 1]) {
+                    yield chunk;
+                }
+            })();
+        });
+
+        const responses = [];
+        for await (const response of service.generateContentStream('anti-gemini-3-flash-preview', {
+            contents: [{ parts: [{ text: 'Say hello' }] }],
+        })) {
+            responses.push(response);
+        }
+
+        expect(responses).toHaveLength(3);
+        expect(service.streamApi).toHaveBeenCalledTimes(3);
+        expect(seenRequests[0].request.session_id).toMatch(/^session-/);
+        expect(seenRequests[1].request.session_id).toBe(seenRequests[0].request.session_id);
+        expect(seenRequests[2].request.session_id).toBe(seenRequests[0].request.session_id);
+        expect(seenRequests[1].request.contents[1]).toEqual({
+            role: 'model',
+            parts: [{ text: 'Hello ' }],
+        });
+        expect(seenRequests[2].request.contents[1]).toEqual({
+            role: 'model',
+            parts: [{ text: 'Hello world' }],
+        });
+        expect(seenRequests[2].request.contents[2]).toEqual({
+            role: 'user',
+            parts: [{ text: 'Please continue from where you left off.' }],
+        });
+    });
 });
 
 describe('Gemini initialization', () => {
