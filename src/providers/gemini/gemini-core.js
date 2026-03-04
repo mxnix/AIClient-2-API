@@ -44,23 +44,34 @@ const DEFAULT_REQUEST_MAX_RETRIES = 10;
 const QUOTA_BACKOFF_JITTER_RATIO = 0.2;
 const MAX_TRANSIENT_ERROR_RETRIES = 2;
 const NO_CAPACITY_IP_COOLDOWN_MS = 5 * 60 * 1000;
+const DEFAULT_FIXED_IP_RACE_CONCURRENCY = 1;
+const DEFAULT_FIXED_IP_RACE_ROUNDS = 3;
+const DEFAULT_FIXED_IP_RACE_REQUEST_DELAY_MS = 2000;
+const FIXED_IP_RACE_INTERNAL_ABORT = Symbol('gemini-fixed-ip-race-internal-abort');
 export const DEFAULT_GEMINI_FIXED_IPS = Object.freeze([
-    '108.177.14.95',
-    '142.250.150.95',
-    '142.251.1.95',
-    '172.253.130.95',
-    '173.194.73.95',
-    '173.194.220.95',
-    '173.194.221.95',
-    '173.194.222.95',
-    '209.85.233.95',
     '64.233.161.95',
-    '64.233.162.95',
-    '64.233.163.95',
-    '64.233.164.95',
-    '64.233.165.95',
-    '74.125.131.95',
-    '74.125.205.95',
+    '142.250.65.74',
+    '142.250.65.234',
+    '142.250.69.42',
+    '142.250.74.10',
+    '142.250.180.10',
+    '142.250.181.170',
+    '142.250.201.170',
+    '142.250.217.234',
+    '142.251.36.106',
+    '142.251.37.10',
+    '142.251.45.74',
+    '142.251.143.106',
+    '142.251.208.106',
+    '142.251.208.170',
+    '142.251.209.42',
+    '172.217.16.138',
+    '172.217.17.106',
+    '172.217.17.202',
+    '172.217.168.74',
+    '172.217.171.74',
+    '173.194.220.95',
+    '216.239.32.223',
 ]);
 const RETRYABLE_ABORT_PATTERNS = [
     'the operation was aborted',
@@ -102,6 +113,24 @@ function normalizeGeminiFixedIpList(rawValue) {
     }
 
     return uniqueIps;
+}
+
+function normalizePositiveInteger(rawValue, fallbackValue) {
+    const normalized = Number.parseInt(rawValue, 10);
+    if (!Number.isFinite(normalized) || normalized <= 0) {
+        return fallbackValue;
+    }
+
+    return normalized;
+}
+
+function normalizeNonNegativeInteger(rawValue, fallbackValue) {
+    const normalized = Number.parseInt(rawValue, 10);
+    if (!Number.isFinite(normalized) || normalized < 0) {
+        return fallbackValue;
+    }
+
+    return normalized;
 }
 
 function extractHostnameFromUrl(rawUrl) {
@@ -811,6 +840,21 @@ export class GeminiApiService {
         this.fixedIpRotationEnabled = config.GEMINI_FIXED_IP_ROTATION_ENABLED !== false &&
             !this.proxyConfig &&
             this.fixedIpList.length > 0;
+        this.fixedIpRaceEnabled = this.fixedIpRotationEnabled && config.GEMINI_FIXED_IP_RACE_ENABLED !== false;
+        this.fixedIpRaceConcurrency = normalizePositiveInteger(
+            config.GEMINI_FIXED_IP_RACE_CONCURRENCY,
+            DEFAULT_FIXED_IP_RACE_CONCURRENCY
+        );
+        this.fixedIpRaceRounds = normalizePositiveInteger(
+            config.GEMINI_FIXED_IP_RACE_ROUNDS,
+            DEFAULT_FIXED_IP_RACE_ROUNDS
+        );
+        this.fixedIpRaceRequestDelayMs = normalizeNonNegativeInteger(
+            config.GEMINI_FIXED_IP_RACE_REQUEST_DELAY_MS,
+            DEFAULT_FIXED_IP_RACE_REQUEST_DELAY_MS
+        );
+        this.fixedIpRaceFallbackToDns = config.GEMINI_FIXED_IP_RACE_FALLBACK_TO_DNS === true;
+        this.fixedIpRaceDisableCooldown = config.GEMINI_FIXED_IP_RACE_DISABLE_COOLDOWN !== false;
 
         const oauth2Options = {
             clientId: OAUTH_CLIENT_ID,
@@ -885,7 +929,10 @@ export class GeminiApiService {
             },
         });
 
-        logger.info(`[Gemini IP] Fixed IP rotation enabled for hosts [${[...this.fixedIpTargetHostnames].join(', ')}] with ${this.fixedIpList.length} candidate IP(s).`);
+        const raceModeSuffix = this.fixedIpRaceEnabled
+            ? ` Race mode enabled (concurrency=${this.fixedIpRaceConcurrency}, rounds=${this.fixedIpRaceRounds}, requestDelayMs=${this.fixedIpRaceRequestDelayMs}, dnsFallback=${this.fixedIpRaceFallbackToDns}, disableCooldown=${this.fixedIpRaceDisableCooldown}).`
+            : '';
+        logger.info(`[Gemini IP] Fixed IP rotation enabled for hosts [${[...this.fixedIpTargetHostnames].join(', ')}] with ${this.fixedIpList.length} candidate IP(s).${raceModeSuffix}`);
     }
 
     _shouldUseFixedIpRotation(rawUrl) {
@@ -1049,11 +1096,40 @@ export class GeminiApiService {
         return this.fixedIpAgentCache.get(cacheKey);
     }
 
-    _createFixedIpAttemptOptions(requestOptions, hostname, fixedIp) {
+    _createFixedIpAttemptOptions(requestOptions, hostname, fixedIp, signal = undefined) {
         return {
             ...requestOptions,
             agent: this._getFixedIpAgent(hostname, fixedIp),
             _geminiFixedIp: fixedIp,
+            ...(signal ? { signal } : {}),
+        };
+    }
+
+    _createChildAbortController(parentSignal) {
+        const controller = new AbortController();
+        if (!parentSignal) {
+            return {
+                controller,
+                dispose: () => {},
+            };
+        }
+
+        if (parentSignal.aborted) {
+            controller.abort(parentSignal.reason);
+            return {
+                controller,
+                dispose: () => {},
+            };
+        }
+
+        const forwardAbort = () => {
+            controller.abort(parentSignal.reason);
+        };
+        parentSignal.addEventListener('abort', forwardAbort, { once: true });
+
+        return {
+            controller,
+            dispose: () => parentSignal.removeEventListener('abort', forwardAbort),
         };
     }
 
@@ -1113,7 +1189,267 @@ export class GeminiApiService {
         return new GaxiosError(message, requestOptions, response);
     }
 
-    async _executeWithFixedIpRotation(requestOptions, defaultAdapter) {
+    _createFixedIpRaceExhaustedError(requestOptions, hostname, model, rounds) {
+        const modelSuffix = model ? ` for model ${model}` : '';
+        const response = {
+            status: 429,
+            data: {
+                error: {
+                    message: `Fixed IP race exhausted after ${rounds} round(s) for ${hostname}${modelSuffix}.`,
+                },
+            },
+            config: requestOptions,
+        };
+        return this._createFixedIpResponseError(requestOptions, response);
+    }
+
+    async _runFixedIpRaceBatch(requestOptions, defaultAdapter, hostname, model, batchIps, roundNumber, totalRounds) {
+        const modelSuffix = model ? ` for model ${model}` : '';
+        const attempts = [];
+
+        return new Promise((resolve) => {
+            const state = {
+                settled: false,
+                pending: batchIps.length,
+                lastResponseError: null,
+                lastTransportError: null,
+            };
+
+            const finalize = (result) => {
+                if (state.settled) {
+                    return;
+                }
+
+                state.settled = true;
+
+                for (const attempt of attempts) {
+                    attempt.dispose();
+                    if (result?.fixedIp && attempt.fixedIp === result.fixedIp) {
+                        continue;
+                    }
+                    if (!attempt.controller.signal.aborted) {
+                        attempt.controller.abort(FIXED_IP_RACE_INTERNAL_ABORT);
+                    }
+                }
+
+                resolve(result);
+            };
+
+            const markRetryableComplete = () => {
+                if (state.settled) {
+                    return;
+                }
+
+                state.pending -= 1;
+                if (state.pending === 0) {
+                    finalize({
+                        type: 'retryable',
+                        lastResponseError: state.lastResponseError,
+                        lastTransportError: state.lastTransportError,
+                    });
+                }
+            };
+
+            const handleFailedResponse = async (response, attemptOptions, fixedIp) => {
+                await this._hydrateErrorResponseBody(response);
+
+                const decision = classifyGeminiFixedIpResponse(response);
+                const rotateQuotaExhausted = decision.reason === '429-quota-exhausted' &&
+                    shouldRotateGeminiQuotaExhaustedFixedIp(model);
+                const error = this._createFixedIpResponseError(attemptOptions, response);
+
+                if (decision.reason === '429-no-capacity' && !this.fixedIpRaceDisableCooldown) {
+                    this._markFixedIpCooldown(hostname, fixedIp, decision.reason, model);
+                }
+
+                if (rotateQuotaExhausted || decision.action === 'rotate') {
+                    this._clearPreferredFixedIp(hostname, fixedIp, decision.reason, model);
+                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} race round ${roundNumber}/${totalRounds} failed via fixed IP ${fixedIp} (${decision.reason}, status=${response.status}).`);
+                    return {
+                        type: 'retryable-response',
+                        error,
+                    };
+                }
+
+                if (decision.reason === '429-quota-exhausted') {
+                    logger.info(`[Gemini IP] ${hostname}${modelSuffix} fixed IP ${fixedIp} returned quota exhaustion during race round ${roundNumber}/${totalRounds}. Stopping race and falling back to the existing quota handling.`);
+                } else {
+                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} fixed IP ${fixedIp} returned non-rotatable status ${response.status} (${decision.reason}) during race round ${roundNumber}/${totalRounds}.`);
+                }
+
+                return {
+                    type: 'fatal',
+                    error,
+                };
+            };
+
+            for (const fixedIp of batchIps) {
+                const { controller, dispose } = this._createChildAbortController(requestOptions?.signal);
+                const attemptOptions = this._createFixedIpAttemptOptions(
+                    requestOptions,
+                    hostname,
+                    fixedIp,
+                    controller.signal
+                );
+                attempts.push({ fixedIp, controller, dispose });
+
+                (async () => {
+                    try {
+                        const response = await defaultAdapter(attemptOptions);
+                        if (state.settled || controller.signal.reason === FIXED_IP_RACE_INTERNAL_ABORT) {
+                            return;
+                        }
+
+                        if (response.status >= 200 && response.status < 300) {
+                            this._rememberSuccessfulFixedIp(hostname, fixedIp, model);
+                            if (model) {
+                                logger.info(`[Gemini IP] ${hostname} request for model ${model} succeeded via fixed IP ${fixedIp} during race round ${roundNumber}/${totalRounds}.`);
+                            } else {
+                                logger.info(`[Gemini IP] ${hostname} request succeeded via fixed IP ${fixedIp} during race round ${roundNumber}/${totalRounds}.`);
+                            }
+                            finalize({
+                                type: 'success',
+                                response,
+                                fixedIp,
+                            });
+                            return;
+                        }
+
+                        const result = await handleFailedResponse(response, attemptOptions, fixedIp);
+                        if (result.type === 'retryable-response') {
+                            state.lastResponseError = result.error;
+                            markRetryableComplete();
+                            return;
+                        }
+
+                        finalize({
+                            type: 'fatal',
+                            error: result.error,
+                            fixedIp,
+                        });
+                    } catch (error) {
+                        if (controller.signal.reason === FIXED_IP_RACE_INTERNAL_ABORT || state.settled) {
+                            return;
+                        }
+
+                        if (requestOptions?.signal?.aborted) {
+                            finalize({
+                                type: 'fatal',
+                                error,
+                                fixedIp,
+                            });
+                            return;
+                        }
+
+                        if (error instanceof GaxiosError && error.response) {
+                            const result = await handleFailedResponse(error.response, attemptOptions, fixedIp);
+                            if (result.type === 'retryable-response') {
+                                state.lastResponseError = result.error;
+                                markRetryableComplete();
+                                return;
+                            }
+
+                            finalize({
+                                type: 'fatal',
+                                error: result.error,
+                                fixedIp,
+                            });
+                            return;
+                        }
+
+                        const decision = classifyGeminiFixedIpError(error);
+                        if (decision.action === 'rotate') {
+                            this._clearPreferredFixedIp(hostname, fixedIp, decision.reason, model);
+                            logger.warn(`[Gemini IP] ${hostname}${modelSuffix} transport failed via fixed IP ${fixedIp} (${decision.reason}) during race round ${roundNumber}/${totalRounds}.`);
+                            state.lastTransportError = error;
+                            markRetryableComplete();
+                            return;
+                        }
+
+                        finalize({
+                            type: 'fatal',
+                            error,
+                            fixedIp,
+                        });
+                    }
+                })();
+            }
+        });
+    }
+
+    async _executeWithConcurrentFixedIpRotation(requestOptions, defaultAdapter) {
+        const hostname = extractHostnameFromUrl(requestOptions?.url);
+        const model = typeof requestOptions?._geminiModel === 'string' && requestOptions._geminiModel.trim()
+            ? requestOptions._geminiModel.trim()
+            : null;
+        const modelSuffix = model ? ` for model ${model}` : '';
+        let lastResponseError = null;
+        let lastTransportError = null;
+
+        for (let roundIndex = 0; roundIndex < this.fixedIpRaceRounds; roundIndex++) {
+            const roundNumber = roundIndex + 1;
+            const candidateIps = this._getFixedIpCandidates(hostname, model);
+            if (candidateIps.length === 0) {
+                logger.info(`[Gemini IP] All fixed IP candidates for ${hostname}${modelSuffix} are currently on cooldown before race round ${roundNumber}/${this.fixedIpRaceRounds}.`);
+                break;
+            }
+
+            const concurrency = Math.min(this.fixedIpRaceConcurrency, candidateIps.length);
+            logger.info(`[Gemini IP] Starting fixed IP race round ${roundNumber}/${this.fixedIpRaceRounds} for ${hostname}${modelSuffix} with ${candidateIps.length} candidate IP(s) and concurrency ${concurrency}.`);
+
+            for (let offset = 0; offset < candidateIps.length; offset += concurrency) {
+                const batchIps = candidateIps.slice(offset, offset + concurrency);
+                const result = await this._runFixedIpRaceBatch(
+                    requestOptions,
+                    defaultAdapter,
+                    hostname,
+                    model,
+                    batchIps,
+                    roundNumber,
+                    this.fixedIpRaceRounds
+                );
+
+                if (result.type === 'success') {
+                    return result.response;
+                }
+
+                if (result.type === 'fatal') {
+                    throw result.error;
+                }
+
+                if (result.lastResponseError) {
+                    lastResponseError = result.lastResponseError;
+                }
+                if (result.lastTransportError) {
+                    lastTransportError = result.lastTransportError;
+                }
+
+                const hasNextBatchInRound = offset + concurrency < candidateIps.length;
+                const hasNextRound = roundIndex < this.fixedIpRaceRounds - 1;
+                if ((hasNextBatchInRound || hasNextRound) && this.fixedIpRaceRequestDelayMs > 0) {
+                    logger.info(`[Gemini IP] Waiting ${this.fixedIpRaceRequestDelayMs}ms before the next fixed IP race attempt for ${hostname}${modelSuffix}.`);
+                    await new Promise(resolve => setTimeout(resolve, this.fixedIpRaceRequestDelayMs));
+                }
+            }
+        }
+
+        if (this.fixedIpRaceFallbackToDns) {
+            logger.info(`[Gemini IP] Fixed IP race exhausted for ${hostname}${modelSuffix}. Falling back to default DNS/transport.`);
+            return defaultAdapter(requestOptions);
+        }
+
+        if (lastResponseError) {
+            throw lastResponseError;
+        }
+
+        if (lastTransportError) {
+            throw lastTransportError;
+        }
+
+        throw this._createFixedIpRaceExhaustedError(requestOptions, hostname, model, this.fixedIpRaceRounds);
+    }
+
+    async _executeWithSequentialFixedIpRotation(requestOptions, defaultAdapter) {
         if (!this._shouldUseFixedIpRotation(requestOptions?.url)) {
             return defaultAdapter(requestOptions);
         }
@@ -1218,6 +1554,18 @@ export class GeminiApiService {
         }
 
         return defaultAdapter(requestOptions);
+    }
+
+    async _executeWithFixedIpRotation(requestOptions, defaultAdapter) {
+        if (!this._shouldUseFixedIpRotation(requestOptions?.url)) {
+            return defaultAdapter(requestOptions);
+        }
+
+        if (this.fixedIpRaceEnabled) {
+            return this._executeWithConcurrentFixedIpRotation(requestOptions, defaultAdapter);
+        }
+
+        return this._executeWithSequentialFixedIpRotation(requestOptions, defaultAdapter);
     }
 
     async initialize() {

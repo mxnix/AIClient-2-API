@@ -14,6 +14,10 @@ function createService(overrides = {}) {
         REQUEST_MAX_RETRIES: 1,
         REQUEST_BASE_DELAY: 1,
         GEMINI_FIXED_IP_ROTATION_ENABLED: true,
+        GEMINI_FIXED_IP_RACE_ENABLED: false,
+        GEMINI_FIXED_IP_RACE_REQUEST_DELAY_MS: 0,
+        GEMINI_FIXED_IP_RACE_FALLBACK_TO_DNS: false,
+        GEMINI_FIXED_IP_RACE_DISABLE_COOLDOWN: false,
         GEMINI_FIXED_IPS: ['1.1.1.1', '2.2.2.2', '3.3.3.3'],
         ...overrides,
     });
@@ -36,6 +40,33 @@ function createRequestOptions(url = 'https://cloudcode-pa.googleapis.com/v1inter
         validateStatus: () => true,
         _geminiModel: model,
     };
+}
+
+function createDelayedAdapterResult(requestOptions, delayMs, factory) {
+    return new Promise((resolve, reject) => {
+        const finish = () => {
+            try {
+                resolve(factory());
+            } catch (error) {
+                reject(error);
+            }
+        };
+
+        const timer = setTimeout(finish, delayMs);
+        const onAbort = () => {
+            clearTimeout(timer);
+            const error = new Error('The operation was aborted.');
+            error.code = 'AbortError';
+            reject(error);
+        };
+
+        if (requestOptions.signal?.aborted) {
+            onAbort();
+            return;
+        }
+
+        requestOptions.signal?.addEventListener('abort', onAbort, { once: true });
+    });
 }
 
 describe('Gemini fixed IP rotation helpers', () => {
@@ -96,6 +127,23 @@ describe('Gemini fixed IP rotation helpers', () => {
         }
 
         expect(typeof prepared.adapter).toBe('function');
+    });
+
+    test('enables race mode by default when config does not override it', () => {
+        const service = new GeminiApiService({
+            HOST: '0.0.0.0',
+            REQUEST_MAX_RETRIES: 1,
+            REQUEST_BASE_DELAY: 1,
+            GEMINI_FIXED_IP_ROTATION_ENABLED: true,
+            GEMINI_FIXED_IPS: ['1.1.1.1', '2.2.2.2', '3.3.3.3'],
+        });
+
+        expect(service.fixedIpRaceEnabled).toBe(true);
+        expect(service.fixedIpRaceFallbackToDns).toBe(false);
+        expect(service.fixedIpRaceDisableCooldown).toBe(true);
+        expect(service.fixedIpRaceRounds).toBe(3);
+        expect(service.fixedIpRaceConcurrency).toBe(1);
+        expect(service.fixedIpRaceRequestDelayMs).toBe(2000);
     });
 
     test('tracks no-capacity cooldowns per model instead of globally per hostname', () => {
@@ -265,6 +313,144 @@ describe('Gemini fixed IP rotation transport', () => {
 
         expect(response.status).toBe(200);
         expect(defaultAdapter).toHaveBeenCalledTimes(1);
+    });
+
+    test('race mode returns the first successful fixed IP without waiting for slower attempts', async () => {
+        const service = createService({
+            GEMINI_FIXED_IP_RACE_ENABLED: true,
+            GEMINI_FIXED_IP_RACE_CONCURRENCY: 2,
+            GEMINI_FIXED_IP_RACE_ROUNDS: 2,
+            GEMINI_FIXED_IP_RACE_FALLBACK_TO_DNS: false,
+        });
+        const seenIps = [];
+        const defaultAdapter = jest.fn((requestOptions) => {
+            seenIps.push(requestOptions._geminiFixedIp ?? 'dns');
+
+            if (requestOptions._geminiFixedIp === '1.1.1.1') {
+                return createDelayedAdapterResult(requestOptions, 50, () =>
+                    createResponse(
+                        429,
+                        { error: { message: 'No capacity available for model gemini-3.1-pro-preview on the server' } },
+                        requestOptions
+                    )
+                );
+            }
+
+            if (requestOptions._geminiFixedIp === '2.2.2.2') {
+                return createDelayedAdapterResult(requestOptions, 5, () =>
+                    createResponse(200, { ok: true }, requestOptions)
+                );
+            }
+
+            return createDelayedAdapterResult(requestOptions, 5, () =>
+                createResponse(500, { error: { message: 'should not be reached' } }, requestOptions)
+            );
+        });
+
+        const response = await service._executeWithFixedIpRotation(
+            createRequestOptions(undefined, 'gemini-3.1-pro-preview'),
+            defaultAdapter
+        );
+
+        expect(response.status).toBe(200);
+        expect(seenIps).toEqual(['1.1.1.1', '2.2.2.2']);
+        expect(service.fixedIpPreferredByModelHostname.get('cloudcode-pa.googleapis.com|gemini-3.1-pro-preview')).toBe('2.2.2.2');
+    });
+
+    test('race mode returns the upstream retryable error after exhausting rounds when DNS fallback is disabled', async () => {
+        const service = createService({
+            GEMINI_FIXED_IP_RACE_ENABLED: true,
+            GEMINI_FIXED_IP_RACE_CONCURRENCY: 2,
+            GEMINI_FIXED_IP_RACE_ROUNDS: 2,
+            GEMINI_FIXED_IP_RACE_FALLBACK_TO_DNS: false,
+        });
+        const defaultAdapter = jest.fn(async (requestOptions) => createResponse(
+            429,
+            { error: { message: 'No capacity available for model gemini-3.1-pro-preview on the server' } },
+            requestOptions
+        ));
+
+        await expect(service._executeWithFixedIpRotation(
+            createRequestOptions(undefined, 'gemini-3.1-pro-preview'),
+            defaultAdapter
+        )).rejects.toMatchObject({
+            response: {
+                status: 429,
+            },
+        });
+
+        expect(defaultAdapter).toHaveBeenCalledTimes(3);
+        expect(defaultAdapter.mock.calls.every(([requestOptions]) => Boolean(requestOptions._geminiFixedIp))).toBe(true);
+    });
+
+    test('race mode can repeat the same IPs across rounds when cooldown is disabled', async () => {
+        const service = createService({
+            GEMINI_FIXED_IP_RACE_ENABLED: true,
+            GEMINI_FIXED_IP_RACE_CONCURRENCY: 2,
+            GEMINI_FIXED_IP_RACE_ROUNDS: 2,
+            GEMINI_FIXED_IP_RACE_FALLBACK_TO_DNS: false,
+            GEMINI_FIXED_IP_RACE_DISABLE_COOLDOWN: true,
+        });
+        const seenIps = [];
+        const defaultAdapter = jest.fn(async (requestOptions) => {
+            seenIps.push(requestOptions._geminiFixedIp);
+            return createResponse(
+                429,
+                { error: { message: 'No capacity available for model gemini-3.1-pro-preview on the server' } },
+                requestOptions
+            );
+        });
+
+        await expect(service._executeWithFixedIpRotation(
+            createRequestOptions(undefined, 'gemini-3.1-pro-preview'),
+            defaultAdapter
+        )).rejects.toMatchObject({
+            response: {
+                status: 429,
+            },
+        });
+
+        expect(seenIps).toEqual([
+            '1.1.1.1',
+            '2.2.2.2',
+            '3.3.3.3',
+            '1.1.1.1',
+            '2.2.2.2',
+            '3.3.3.3',
+        ]);
+        expect(defaultAdapter).toHaveBeenCalledTimes(6);
+        expect(service._getBlockedFixedIps('cloudcode-pa.googleapis.com', 'gemini-3.1-pro-preview')).toEqual([]);
+    });
+
+    test('race mode falls back to DNS after exhausting rounds when configured', async () => {
+        const service = createService({
+            GEMINI_FIXED_IP_RACE_ENABLED: true,
+            GEMINI_FIXED_IP_RACE_CONCURRENCY: 2,
+            GEMINI_FIXED_IP_RACE_ROUNDS: 1,
+            GEMINI_FIXED_IP_RACE_FALLBACK_TO_DNS: true,
+        });
+        const seenIps = [];
+        const defaultAdapter = jest.fn(async (requestOptions) => {
+            seenIps.push(requestOptions._geminiFixedIp ?? 'dns');
+            if (requestOptions._geminiFixedIp) {
+                return createResponse(
+                    429,
+                    { error: { message: 'No capacity available for model gemini-3.1-pro-preview on the server' } },
+                    requestOptions
+                );
+            }
+
+            return createResponse(200, { ok: true }, requestOptions);
+        });
+
+        const response = await service._executeWithFixedIpRotation(
+            createRequestOptions(undefined, 'gemini-3.1-pro-preview'),
+            defaultAdapter
+        );
+
+        expect(response.status).toBe(200);
+        expect(seenIps).toEqual(['1.1.1.1', '2.2.2.2', '3.3.3.3', 'dns']);
+        expect(defaultAdapter.mock.calls.at(-1)[0]._geminiFixedIp).toBeUndefined();
     });
 });
 
