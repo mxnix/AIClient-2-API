@@ -629,17 +629,19 @@ export class GeminiApiService {
             return;
         }
 
-        this.authClient.transporter.interceptors.request.add(async (requestOptions) => {
-            if (!this._shouldUseFixedIpRotation(requestOptions?.url)) {
-                return requestOptions;
-            }
+        this.authClient.transporter.interceptors.request.add({
+            resolved: async (requestOptions) => {
+                if (!this._shouldUseFixedIpRotation(requestOptions?.url)) {
+                    return requestOptions;
+                }
 
-            return {
-                ...requestOptions,
-                adapter: async (preparedRequestOptions, defaultAdapter) => {
-                    return this._executeWithFixedIpRotation(preparedRequestOptions, defaultAdapter);
-                },
-            };
+                return {
+                    ...requestOptions,
+                    adapter: async (preparedRequestOptions, defaultAdapter) => {
+                        return this._executeWithFixedIpRotation(preparedRequestOptions, defaultAdapter);
+                    },
+                };
+            },
         });
 
         logger.info(`[Gemini IP] Fixed IP rotation enabled for hosts [${[...this.fixedIpTargetHostnames].join(', ')}] with ${this.fixedIpList.length} candidate IP(s).`);

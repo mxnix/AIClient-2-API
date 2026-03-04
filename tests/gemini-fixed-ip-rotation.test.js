@@ -31,6 +31,7 @@ function createRequestOptions(url = 'https://cloudcode-pa.googleapis.com/v1inter
     return {
         url: new URL(url),
         method: 'POST',
+        headers: new Headers(),
         responseType: 'json',
         validateStatus: () => true,
     };
@@ -81,6 +82,19 @@ describe('Gemini fixed IP rotation helpers', () => {
         });
 
         expect(addresses).toEqual([{ address: '1.1.1.1', family: 4 }]);
+    });
+
+    test('installs a gaxios request interceptor that injects the fixed-IP adapter', async () => {
+        const service = createService();
+        const interceptors = Array.from(service.authClient.transporter.interceptors.request.values());
+        let prepared = createRequestOptions();
+        for (const interceptor of interceptors) {
+            if (typeof interceptor?.resolved === 'function') {
+                prepared = await interceptor.resolved(prepared);
+            }
+        }
+
+        expect(typeof prepared.adapter).toBe('function');
     });
 });
 
