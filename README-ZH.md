@@ -44,7 +44,6 @@
 > - **2025.12.25** - 配置文件统一管理：所有配置集中到 `configs/` 目录，Docker 用户需更新挂载路径为 `-v "本地路径:/app/configs"`
 > - **2025.12.11** - Docker 镜像自动构建并发布到 Docker Hub: [nikzmx/aiclient-2-api](https://hub.docker.com/r/nikzmx/aiclient-2-api)
 > - **2025.11.30** - 新增 Antigravity 协议支持，支持通过 Google 内部接口访问 Gemini 3 Pro、Claude Sonnet 4.5 等模型
-> - **2025.11.16** - 新增 Ollama 协议支持，统一接口访问所有支持的模型（Claude、Gemini、Qwen、OpenAI等）
 > - **2025.11.11** - 新增 Web UI 管理控制台，支持实时配置管理和健康状态监控
 > - **2025.11.06** - 新增对 Gemini 3 预览版的支持，增强模型兼容性和性能优化
 > - **2025.10.18** - Kiro 开放注册，新用户赠送 500 额度，已完整支持 Claude Sonnet 4.5
@@ -68,6 +67,7 @@
 
 ### 🚀 突破限制，提升效率
 *   **绕过官方限制**：利用 OAuth 授权机制，有效突破 Gemini, Antigravity 等服务的免费 API 速率和配额限制
+*   **TLS 指纹绕过**：内置 TLS Sidecar (Go uTLS) 模拟浏览器特征，有效绕过 Grok 等服务的 Cloudflare 403 封锁
 *   **免费高级模型**：通过 Kiro API 模式免费使用 Claude Opus 4.5，通过 Qwen OAuth 模式使用 Qwen3 Coder Plus，降低使用成本
 *   **账号池智能调度**：支持多账号轮询、自动故障转移和配置降级，确保 99.9% 服务可用性
 
@@ -92,7 +92,6 @@
   - [📋 核心功能](#-核心功能)
 - [🔐 授权配置指南](#-授权配置指南)
 - [📁 授权文件存储路径](#-授权文件存储路径)
-- [🦙 Ollama 协议使用示例](#-ollama-协议使用示例)
 - [⚙️ 高级配置](#高级配置)
 - [❓ 常见问题](#-常见问题)
 - [📄 开源许可](#-开源许可)
@@ -150,6 +149,15 @@ docker compose up -d
 *   ✅ 填入各提供商的 API Key 或上传 OAuth 凭据文件
 *   ✅ 实时切换默认模型提供商
 *   ✅ 监控健康状态和实时请求日志
+
+#### 4. 本地环境准备 (非 Docker 用户)
+如果您是在本地直接运行（通过脚本或 Node.js），且需要绕过 Grok 等服务的 TLS 检测，请务必：
+*   ✅ **安装 Go 语言环境**：前往 [Go 官网](https://go.dev/) 下载并安装 (1.20+)。
+*   ✅ **手动编译 Sidecar**：执行以下命令编译 TLS 代理组件：
+    ```bash
+    cd tls-sidecar && go build -o tls-sidecar && cd ..
+    ```
+    *注意：若未编译此二进制文件，TLS Sidecar 功能将因找不到执行文件而无法启动。*
 
 #### 脚本执行示例
 ```
@@ -345,41 +353,6 @@ curl http://localhost:3000/claude-kiro-oauth/v1/chat/completions \
 
 ---
 
-### 🦙 Ollama 协议使用示例
-
-本项目支持 Ollama 协议，可以通过统一接口访问所有支持的模型。Ollama 端点提供 `/api/tags`、`/api/chat`、`/api/generate` 等标准接口。
-
-**Ollama API 调用示例**：
-
-1. **列出所有可用模型**：
-```bash
-curl http://localhost:3000/ollama/api/tags \
-  -H "Authorization: Bearer your-api-key"
-```
-
-2. **聊天接口**：
-```bash
-curl http://localhost:3000/ollama/api/chat \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer your-api-key" \
-  -d '{
-    "model": "[Claude] claude-sonnet-4.5",
-    "messages": [
-      {"role": "user", "content": "你好"}
-    ]
-  }'
-```
-
-3. **使用模型前缀指定提供商**：
-- `[Kiro]` - 使用 Kiro API 访问 Claude 模型
-- `[Claude]` - 使用 Claude 官方 API
-- `[Gemini CLI]` - 通过 Gemini CLI OAuth 访问
-- `[OpenAI]` - 使用 OpenAI 官方 API
-- `[Grok]` - 通过 Grok Cookie/SSO 访问
-- `[Qwen CLI]` - 通过 Qwen OAuth 访问
-
----
-
 ### 高级配置
 
 <details>
@@ -529,6 +502,38 @@ curl http://localhost:3000/ollama/api/chat \
 - Fallback 只会在协议兼容的类型之间进行（如 `gemini-*` 之间、`claude-*` 之间）
 - 系统会自动检查目标 Provider Type 是否支持当前请求的模型
 
+#### 5. TLS Sidecar (Bypass 403/Cloudflare)
+
+针对 Grok 等对 TLS 指纹（JA3/JA4）校验严格的服务，本项目集成了基于 Go uTLS 的 Sidecar 代理，通过模拟浏览器 TLS 特征有效解决 403 Forbidden 报错。
+
+**配置说明**：
+
+1.  **编译二进制文件**：
+    由于 TLS 模拟需要 Go 语言支持，您需要先编译 sidecar：
+    ```bash
+    cd tls-sidecar
+    go build -o tls-sidecar
+    ```
+    *Windows 用户编译后请确保生成的 `tls-sidecar.exe` 位于 `tls-sidecar/` 或根目录。*
+
+2.  **启用配置**：
+    在 Web UI 的“配置管理”中开启 **TLS Sidecar**，或修改 `configs/config.json`：
+    ```json
+    {
+      "TLS_SIDECAR_ENABLED": true,
+      "TLS_SIDECAR_PORT": 9090
+    }
+    ```
+
+3.  **工作原理**：
+    - 开启后系统自动启动并管理该 Go 进程。
+    - 针对特定提供商（如 Grok）的请求会自动路由至 Sidecar。
+    - Sidecar 使用 Chrome 最新指纹进行 TLS 握手，支持 HTTP/2 自动协商。
+
+**注意事项**：
+- 本地运行需安装 Go 环境（1.20+）。
+- **Docker 用户**：镜像已内置编译好的二进制，只需在配置中开启即可，无需手动编译。
+
 </details>
 
 ---
@@ -641,7 +646,7 @@ kill -9 <PID>
 **问题描述**：调用 API 接口时返回 404 Not Found 错误。
 
 **解决方案**：
-- **检查接口路径**：确保使用正确的接口路径，如 `/v1/chat/completions`、`/ollama/api/chat` 等
+- **检查接口路径**：确保使用正确的接口路径，如 `/v1/chat/completions` 等
 - **检查客户端自动补全**：某些客户端（如 Cherry-Studio、NextChat）会自动在 Base URL 后追加路径（如 `/v1/chat/completions`），导致路径重复。请查看控制台中的实际请求 URL，移除多余的路径部分
 - **检查服务状态**：确认服务已正常启动，访问 `http://localhost:3000` 查看 Web UI
 - **检查端口配置**：确保请求发送到正确的端口（默认 3000）
@@ -672,6 +677,7 @@ kill -9 <PID>
 **问题描述**：API 请求返回 403 Forbidden 错误。
 
 **解决方案**：
+- **开启 TLS Sidecar**：针对 Grok 等服务，403 通常是因为 TLS 指纹被屏蔽。请参考 [高级配置 - TLS Sidecar](#5-tls-sidecar-bypass-403cloudflare) 开启并编译 Sidecar。
 - **检查节点状态**：如果在 Web UI 的"提供商池"页面中看到节点状态正常（健康检查通过），则可以忽略此报错，系统会自动处理
 - **检查账号权限**：确认使用的账号有权限访问请求的模型或服务
 - **检查 API Key 权限**：某些提供商的 API Key 可能有访问范围限制，确保 Key 有足够权限

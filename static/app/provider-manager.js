@@ -1,16 +1,23 @@
 // 提供商管理功能模块
 
 import { providerStats, updateProviderStats } from './constants.js';
-import { showToast, formatUptime } from './utils.js';
+import { showToast, formatUptime, getProviderConfigs } from './utils.js';
 import { fileUploadHandler } from './file-upload.js';
 import { t, getCurrentLanguage } from './i18n.js';
-import { loadConfigList } from './upload-config-manager.js';
+import { renderRoutingExamples } from './routing-examples.js';
+import { updateModelsProviderConfigs } from './models-manager.js';
+import { updateTutorialProviderConfigs } from './tutorial-manager.js';
+import { updateUsageProviderConfigs } from './usage-manager.js';
+import { updateConfigProviderConfigs } from './config-manager.js';
+import { loadConfigList, updateProviderFilterOptions } from './upload-config-manager.js';
 import { setServiceMode } from './event-handlers.js';
 
 // 保存初始服务器时间和运行时间
 let initialServerTime = null;
 let initialUptime = null;
 let initialLoadTime = null;
+let isStaticProviderConfigsUpdated = false;
+let cachedSupportedProviders = null;
 
 /**
  * 加载系统信息
@@ -181,11 +188,35 @@ function updateTimeDisplay() {
  */
 async function loadProviders() {
     try {
-        const [providers, supportedProviders] = await Promise.all([
-            window.apiClient.get('/providers'),
-            window.apiClient.get('/providers/supported')
-        ]);
-        renderProviders(providers, supportedProviders);
+        const providers = await window.apiClient.get('/providers');
+
+        // 动态更新其他模块的提供商信息，只需更新一次
+        if (!isStaticProviderConfigsUpdated) {
+            cachedSupportedProviders = await window.apiClient.get('/providers/supported');
+            const providerConfigs = getProviderConfigs(cachedSupportedProviders);
+            
+            // 动态更新凭据文件管理的提供商类型筛选项
+            updateProviderFilterOptions(providerConfigs);
+            
+            // 动态更新仪表盘页面的路径路由调用示例
+            renderRoutingExamples(providerConfigs);
+            
+            // 动态更新仪表盘页面的可用模型列表提供商信息
+            updateModelsProviderConfigs(providerConfigs);
+            
+            // 动态更新配置教程页面的提供商信息
+            updateTutorialProviderConfigs(providerConfigs);
+            
+            // 动态更新用量查询页面的提供商信息
+            updateUsageProviderConfigs(providerConfigs);
+            
+            // 动态更新配置管理页面的提供商选择标签
+            updateConfigProviderConfigs(providerConfigs);
+            
+            isStaticProviderConfigsUpdated = true;
+        }
+
+        renderProviders(providers, cachedSupportedProviders);
     } catch (error) {
         console.error('Failed to load providers:', error);
     }
@@ -209,21 +240,7 @@ function renderProviders(providers, supportedProviders = []) {
     // 始终显示统计卡片
     if (statsGrid) statsGrid.style.display = 'grid';
     
-    // 定义所有支持的提供商配置（顺序、显示名称、是否显示）
-    // visible 现在由 supportedProviders 决定
-    const providerConfigs = [
-        { id: 'forward-api', name: 'NewAPI', visible: supportedProviders.includes('forward-api') },
-        { id: 'gemini-cli-oauth', name: 'Gemini CLI OAuth', visible: supportedProviders.includes('gemini-cli-oauth') },
-        { id: 'gemini-antigravity', name: 'Gemini Antigravity', visible: supportedProviders.includes('gemini-antigravity') },
-        { id: 'openai-custom', name: 'OpenAI Custom', visible: supportedProviders.includes('openai-custom') },
-        { id: 'claude-custom', name: 'Claude Custom', visible: supportedProviders.includes('claude-custom') },
-        { id: 'claude-kiro-oauth', name: 'Claude Kiro OAuth', visible: supportedProviders.includes('claude-kiro-oauth') },
-        { id: 'openai-qwen-oauth', name: 'OpenAI Qwen OAuth', visible: supportedProviders.includes('openai-qwen-oauth') },
-        { id: 'openaiResponses-custom', name: 'OpenAI Responses', visible: supportedProviders.includes('openaiResponses-custom') },
-        { id: 'openai-iflow', name: 'OpenAI iFlow', visible: supportedProviders.includes('openai-iflow') },
-        { id: 'openai-codex-oauth', name: 'OpenAI Codex OAuth', visible: supportedProviders.includes('openai-codex-oauth') },
-        { id: 'grok-custom', name: 'Grok Reverse', visible: supportedProviders.includes('grok-custom') },
-    ];
+    const providerConfigs = getProviderConfigs(supportedProviders);
     
     // 提取显示的 ID 顺序
     const providerDisplayOrder = providerConfigs.filter(c => c.visible !== false).map(c => c.id);
@@ -267,7 +284,7 @@ function renderProviders(providers, supportedProviders = []) {
         providerDiv.dataset.providerType = providerType;
         providerDiv.style.cursor = 'pointer';
 
-        const healthyCount = accounts.filter(acc => acc.isHealthy).length;
+        const healthyCount = accounts.filter(acc => acc.isHealthy && !acc.isDisabled).length;
         const totalCount = accounts.length;
         const usageCount = accounts.reduce((sum, acc) => sum + (acc.usageCount || 0), 0);
         const errorCount = accounts.reduce((sum, acc) => sum + (acc.errorCount || 0), 0);
@@ -357,7 +374,7 @@ function renderProviders(providers, supportedProviders = []) {
             });
         }
     });
-    
+
     // 更新统计卡片数据
     const activeProviders = hasProviders ? Object.keys(providers).length : 0;
     updateProviderStatsDisplay(activeProviders, totalHealthy, totalAccounts);
