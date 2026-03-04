@@ -163,7 +163,7 @@ export async function loadMonitorConfig() {
     );
 
     const config = {
-        checkIntervalMs: readNumberEnv('MONITOR_INTERVAL_MS', 10 * 60 * 1000, 60 * 1000),
+        checkIntervalMs: readNumberEnv('MONITOR_INTERVAL_MS', 30 * 60 * 1000, 60 * 1000),
         probeTimeoutMs: readNumberEnv('PROBE_TIMEOUT_MS', 45 * 1000, 5 * 1000),
         probeConcurrency: readNumberEnv('PROBE_CONCURRENCY', 4, 1),
         gemini: {
