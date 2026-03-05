@@ -13,6 +13,11 @@ let isLoadingConfigs = false; // 防止重复加载配置
  * @param {string} statusFilter - 状态过滤
  */
 function searchConfigs(searchTerm = '', statusFilter = '', providerFilter = '') {
+    // 确保 searchTerm 是字符串，防止事件对象等非字符串被传入
+    if (typeof searchTerm !== 'string') {
+        searchTerm = '';
+    }
+
     if (!allConfigs.length) {
         console.log('没有配置数据可搜索');
         return;
@@ -88,7 +93,11 @@ function createConfigItemElement(config, index) {
     const typeIcon = config.type === 'oauth' ? 'fa-key' :
                     config.type === 'api-key' ? 'fa-lock' :
                     config.type === 'provider-pool' ? 'fa-network-wired' :
-                    config.type === 'system-prompt' ? 'fa-file-text' : 'fa-file-code';
+                    config.type === 'system-prompt' ? 'fa-file-text' :
+                    config.type === 'plugins' ? 'fa-plug' :
+                    config.type === 'usage' ? 'fa-chart-line' :
+                    config.type === 'config' ? 'fa-cog' :
+                    config.type === 'database' ? 'fa-database' : 'fa-file-code';
 
     // 检测提供商信息
     const providerInfo = detectProviderFromPath(config.path);
@@ -453,6 +462,11 @@ function updateStats() {
  * @param {string} providerFilter - 提供商过滤
  */
 async function loadConfigList(searchTerm = '', statusFilter = '', providerFilter = '') {
+    // 确保 searchTerm 是字符串，处理事件监听器直接调用的情况
+    if (typeof searchTerm !== 'string') {
+        searchTerm = '';
+    }
+
     // 防止重复加载
     if (isLoadingConfigs) {
         console.log('正在加载配置列表，跳过重复调用');
@@ -479,80 +493,14 @@ async function loadConfigList(searchTerm = '', statusFilter = '', providerFilter
     } catch (error) {
         console.error('加载配置列表失败:', error);
         showToast(t('common.error'), t('common.error') + ': ' + error.message, 'error');
-        
-        // 使用模拟数据作为示例
-        allConfigs = sortConfigs(generateMockConfigData());
-        filteredConfigs = [...allConfigs];
+        allConfigs = [];
+        filteredConfigs = [];
         renderConfigList();
         updateStats();
     } finally {
         isLoadingConfigs = false;
         console.log('配置列表加载完成');
     }
-}
-
-/**
- * 生成模拟配置数据（用于演示）
- * @returns {Array} 模拟配置数据
- */
-function generateMockConfigData() {
-    return [
-        {
-            name: 'provider_pools.json',
-            path: './configs/provider_pools.json',
-            type: 'provider-pool',
-            size: 2048,
-            modified: '2025-11-11T04:30:00.000Z',
-            isUsed: true,
-            content: JSON.stringify({
-                "gemini-cli-oauth": [
-                    {
-                        "GEMINI_OAUTH_CREDS_FILE_PATH": "~/.gemini/oauth/creds.json",
-                        "PROJECT_ID": "test-project"
-                    }
-                ]
-            }, null, 2)
-        },
-        {
-            name: 'config.json',
-            path: './configs/config.json',
-            type: 'other',
-            size: 1024,
-            modified: '2025-11-10T12:00:00.000Z',
-            isUsed: true,
-            content: JSON.stringify({
-                "REQUIRED_API_KEY": "123456",
-                "SERVER_PORT": 3000
-            }, null, 2)
-        },
-        {
-            name: 'oauth_creds.json',
-            path: '~/.gemini/oauth/creds.json',
-            type: 'oauth',
-            size: 512,
-            modified: '2025-11-09T08:30:00.000Z',
-            isUsed: false,
-            content: '{"client_id": "test", "client_secret": "test"}'
-        },
-        {
-            name: 'input_system_prompt.txt',
-            path: './configs/input_system_prompt.txt',
-            type: 'system-prompt',
-            size: 256,
-            modified: '2025-11-08T15:20:00.000Z',
-            isUsed: true,
-            content: '你是一个有用的AI助手...'
-        },
-        {
-            name: 'invalid_config.json',
-            path: './invalid_config.json',
-            type: 'other',
-            size: 128,
-            modified: '2025-11-07T10:15:00.000Z',
-            isUsed: false,
-            content: '{"invalid": json}'
-        }
-    ];
 }
 
 /**
@@ -912,7 +860,7 @@ function initUploadConfigManager() {
     }
 
     if (refreshBtn) {
-        refreshBtn.addEventListener('click', loadConfigList);
+        refreshBtn.addEventListener('click', () => loadConfigList());
     }
 
     if (downloadAllBtn) {
