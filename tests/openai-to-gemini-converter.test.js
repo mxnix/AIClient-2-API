@@ -66,4 +66,31 @@ describe('OpenAI to Gemini conversion', () => {
         expect(request.generationConfig.topK).toBe(64);
         expect(request.generationConfig.thinkingConfig).toBeUndefined();
     });
+
+    test('preserves interleaved system and developer messages after the first user turn', () => {
+        const converter = new OpenAIConverter();
+        const request = converter.toGeminiRequest({
+            model: 'gemini-3.1-pro-preview',
+            messages: [
+                { role: 'system', content: 'Lead system instruction' },
+                { role: 'user', content: 'First user turn' },
+                { role: 'developer', content: 'Late developer note' },
+                { role: 'assistant', content: 'Reply' },
+            ],
+        });
+
+        expect(request.system_instruction).toEqual({
+            parts: [{ text: 'Lead system instruction' }],
+        });
+        expect(request.contents).toEqual([
+            {
+                role: 'user',
+                parts: [
+                    { text: 'First user turn' },
+                    { text: 'Late developer note' },
+                ],
+            },
+            { role: 'model', parts: [{ text: 'Reply' }] },
+        ]);
+    });
 });

@@ -13,11 +13,13 @@ export const PROVIDER_MODELS = {
         'gemini-3-pro-preview',
         'gemini-3-flash-preview',
         'gemini-3.1-pro-preview',
+        'gemini-3.1-flash-lite-preview',
     ],
     'gemini-antigravity': [
         'gemini-2.5-computer-use-preview-10-2025',
         'gemini-3-pro-image-preview',
         'gemini-3.1-pro-preview',
+        'gemini-3.1-flash-lite-preview',
         'gemini-3-pro-preview',
         'gemini-3-flash-preview',
         'gemini-2.5-flash-preview',
@@ -85,7 +87,8 @@ export const PROVIDER_MODELS = {
         'gpt-5.2',
         'gpt-5.2-codex',
         'gpt-5.3-codex',
-        'gpt-5.3-codex-spark'
+        'gpt-5.3-codex-spark',
+        'gpt-5.4',
     ],
     'forward-api': [],
     'grok-custom': [
