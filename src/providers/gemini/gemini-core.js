@@ -197,6 +197,78 @@ function isRetryableAbortError(error) {
     return RETRYABLE_ABORT_PATTERNS.some((pattern) => errorText.includes(pattern));
 }
 
+function createAbortError(message = 'The operation was aborted.') {
+    const error = new Error(message);
+    error.name = 'AbortError';
+    error.code = 'AbortError';
+    return error;
+}
+
+function throwIfAborted(signal) {
+    if (!signal?.aborted) {
+        return;
+    }
+
+    const abortReason = signal.reason;
+    if (abortReason instanceof Error) {
+        throw abortReason;
+    }
+
+    throw createAbortError(typeof abortReason === 'string' && abortReason.trim()
+        ? abortReason
+        : 'The operation was aborted.');
+}
+
+function waitWithAbort(ms, signal) {
+    throwIfAborted(signal);
+
+    if (!Number.isFinite(ms) || ms <= 0) {
+        return Promise.resolve();
+    }
+
+    if (!signal) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        let timer = null;
+
+        const cleanup = () => {
+            if (timer) {
+                clearTimeout(timer);
+                timer = null;
+            }
+            signal.removeEventListener('abort', onAbort);
+        };
+
+        const finishResolve = () => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            cleanup();
+            resolve();
+        };
+
+        const onAbort = () => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            cleanup();
+            try {
+                throwIfAborted(signal);
+            } catch (error) {
+                reject(error);
+            }
+        };
+
+        timer = setTimeout(finishResolve, ms);
+        signal.addEventListener('abort', onAbort, { once: true });
+    });
+}
+
 export function classifyGeminiFixedIpResponse(response) {
     const status = Number(response?.status);
     const errorText = extractGeminiErrorText(response?.data);
@@ -740,15 +812,17 @@ function ensureRolesInContents(requestBody) {
     return requestBody;
 }
 
-async function* apply_anti_truncation_to_stream(service, model, requestBody) {
+async function* apply_anti_truncation_to_stream(service, model, requestBody, signal = undefined) {
     let currentRequest = { ...requestBody };
     let allGeneratedText = '';
     const baseMonitorRequestId = service.config?._monitorRequestId || null;
 
     while (true) {
+        throwIfAborted(signal);
+
         // 发送请求并处理流式响应
         const apiRequest = service._buildCodeAssistGenerateRequest(model, currentRequest, baseMonitorRequestId);
-        const stream = service.streamApi(API_ACTIONS.STREAM_GENERATE_CONTENT, apiRequest);
+        const stream = service.streamApi(API_ACTIONS.STREAM_GENERATE_CONTENT, apiRequest, false, 0, signal);
 
         let lastChunk = null;
         let hasContent = false;
@@ -1387,6 +1461,7 @@ export class GeminiApiService {
         let lastTransportError = null;
 
         for (let roundIndex = 0; roundIndex < this.fixedIpRaceRounds; roundIndex++) {
+            throwIfAborted(requestOptions?.signal);
             const roundNumber = roundIndex + 1;
             const candidateIps = this._getFixedIpCandidates(hostname, model);
             if (candidateIps.length === 0) {
@@ -1428,7 +1503,7 @@ export class GeminiApiService {
                 const hasNextRound = roundIndex < this.fixedIpRaceRounds - 1;
                 if ((hasNextBatchInRound || hasNextRound) && this.fixedIpRaceRequestDelayMs > 0) {
                     logger.info(`[Gemini IP] Waiting ${this.fixedIpRaceRequestDelayMs}ms before the next fixed IP race attempt for ${hostname}${modelSuffix}.`);
-                    await new Promise(resolve => setTimeout(resolve, this.fixedIpRaceRequestDelayMs));
+                    await waitWithAbort(this.fixedIpRaceRequestDelayMs, requestOptions?.signal);
                 }
             }
         }
@@ -1916,12 +1991,14 @@ export class GeminiApiService {
         }
     }
 
-    async * streamApi(method, body, isRetry = false, retryCount = 0) {
+    async * streamApi(method, body, isRetry = false, retryCount = 0, signal = undefined) {
         const maxRetries = this.config.REQUEST_MAX_RETRIES || DEFAULT_REQUEST_MAX_RETRIES;
         const transientMaxRetries = Math.min(maxRetries, MAX_TRANSIENT_ERROR_RETRIES);
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000; // 1 second base delay
 
         try {
+            throwIfAborted(signal);
+
             if (body?.model) {
                 logger.info(`[Gemini API] Dispatch ${method} (stream) | model=${body.model} | project=${body.project || this.projectId || 'unknown'}`);
             }
@@ -1937,6 +2014,7 @@ export class GeminiApiService {
                 responseType: "stream",
                 body: JSON.stringify(body),
                 _geminiModel: body?.model,
+                ...(signal ? { signal } : {}),
             };
             const res = await this.authClient.request(requestOptions);
             if (res.status !== 200) {
@@ -1951,6 +2029,10 @@ export class GeminiApiService {
             const errorMessage = error.message || '';
             const errorDetails = error.response?.data;
             
+            if (signal?.aborted || isRetryableAbortError(error)) {
+                throw error;
+            }
+
             // 检查是否为可重试的网络错误
             const isNetworkError = isRetryableNetworkError(error);
             
@@ -1989,8 +2071,8 @@ export class GeminiApiService {
                 const delay = computeQuotaRetryDelayMs(baseDelay, retryCount, quotaRetryDelayHintMs);
                 const hintLog = quotaRetryDelayHintMs !== null ? ` (server hint >= ${Math.round(quotaRetryDelayHintMs)}ms)` : '';
                 logger.info(`[Gemini API] Received 429 (Too Many Requests) during stream. Retrying in ${delay}ms${hintLog}... (attempt ${retryCount + 1}/${maxRetries})`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-                yield* this.streamApi(method, body, isRetry, retryCount + 1);
+                await waitWithAbort(delay, signal);
+                yield* this.streamApi(method, body, isRetry, retryCount + 1, signal);
                 return;
             }
 
@@ -1998,8 +2080,8 @@ export class GeminiApiService {
             if (status >= 500 && status < 600 && retryCount < transientMaxRetries) {
                 const delay = baseDelay * Math.pow(2, retryCount);
                 logger.info(`[Gemini API] Received ${status} server error during stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${transientMaxRetries})`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-                yield* this.streamApi(method, body, isRetry, retryCount + 1);
+                await waitWithAbort(delay, signal);
+                yield* this.streamApi(method, body, isRetry, retryCount + 1, signal);
                 return;
             }
 
@@ -2008,8 +2090,8 @@ export class GeminiApiService {
                 const delay = baseDelay * Math.pow(2, retryCount);
                 const errorIdentifier = errorCode || errorMessage.substring(0, 50);
                 logger.info(`[Gemini API] Network error (${errorIdentifier}) during stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${transientMaxRetries})`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-                yield* this.streamApi(method, body, isRetry, retryCount + 1);
+                await waitWithAbort(delay, signal);
+                yield* this.streamApi(method, body, isRetry, retryCount + 1, signal);
                 return;
             }
 
@@ -2080,8 +2162,11 @@ export class GeminiApiService {
         return toGeminiApiResponse(response.response);
     }
 
-    async * generateContentStream(model, requestBody) {
+    async * generateContentStream(model, requestBody, options = {}) {
         logger.info(`[Auth Token] Time until expiry: ${formatExpiryTime(this.authClient.credentials.expiry_date)}`);
+        const signal = options?.signal;
+
+        throwIfAborted(signal);
 
         let monitorRequestId = null;
         // 临时存储 monitorRequestId
@@ -2115,7 +2200,7 @@ export class GeminiApiService {
             // 使用防截断流处理
             const processedRequestBody = ensureRolesInContents(requestBody);
             ensureGeminiSessionId(processedRequestBody);
-            yield* apply_anti_truncation_to_stream(this, actualModel, processedRequestBody);
+            yield* apply_anti_truncation_to_stream(this, actualModel, processedRequestBody, signal);
         } else {
             if (typeof model === 'string' && model.startsWith('anti-')) {
                 const normalizedBaseModel = normalizeProviderModel(MODEL_PROVIDER.GEMINI_CLI, model.substring(5));
@@ -2130,7 +2215,7 @@ export class GeminiApiService {
             const processedRequestBody = ensureRolesInContents(requestBody);
             ensureGeminiSessionId(processedRequestBody);
             const apiRequest = this._buildCodeAssistGenerateRequest(selectedModel, processedRequestBody, monitorRequestId);
-            const stream = this.streamApi(API_ACTIONS.STREAM_GENERATE_CONTENT, apiRequest);
+            const stream = this.streamApi(API_ACTIONS.STREAM_GENERATE_CONTENT, apiRequest, false, 0, signal);
             for await (const chunk of stream) {
                 yield toGeminiApiResponse(chunk.response);
             }

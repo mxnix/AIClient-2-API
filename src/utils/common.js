@@ -350,6 +350,7 @@ export async function handleStreamRequest(res, service, model, requestBody, from
     const currentRetry = retryContext?.currentRetry ?? 0;
     const CONFIG = retryContext?.CONFIG;
     const isRetry = currentRetry > 0;
+    const upstreamAbortController = retryContext?.upstreamAbortController || new AbortController();
     
     // 使用共享的 clientDisconnected 状态（如果是重试，继承上层的状态）
     let clientDisconnected = retryContext?.clientDisconnected || { value: false };
@@ -360,11 +361,23 @@ export async function handleStreamRequest(res, service, model, requestBody, from
     // 监听客户端断开连接事件（命名函数，便于移除）
     const onClientClose = () => {
         clientDisconnected.value = true;
+        if (!upstreamAbortController.signal.aborted) {
+            const abortError = new Error('Client disconnected');
+            abortError.name = 'AbortError';
+            abortError.code = 'AbortError';
+            upstreamAbortController.abort(abortError);
+        }
         logger.info('[Stream] Client disconnected, stopping stream processing');
     };
     
     const onClientError = (err) => {
         clientDisconnected.value = true;
+        if (!upstreamAbortController.signal.aborted) {
+            const abortError = new Error(err?.message || 'Response stream error');
+            abortError.name = 'AbortError';
+            abortError.code = 'AbortError';
+            upstreamAbortController.abort(abortError);
+        }
         logger.error('[Stream] Response stream error:', err.message);
     };
     
@@ -387,7 +400,14 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         // The service returns a stream in its native format (toProvider).
         const needsConversion = getProtocolPrefix(fromProvider) !== getProtocolPrefix(toProvider);
         requestBody.model = model;
-        const nativeStream = await service.generateContentStream(model, requestBody);
+        if (clientDisconnected.value || upstreamAbortController.signal.aborted) {
+            logger.info('[Stream] Skipping upstream stream creation because client is already disconnected');
+            responseClosed = true;
+            return;
+        }
+        const nativeStream = await service.generateContentStream(model, requestBody, {
+            signal: upstreamAbortController.signal
+        });
         const addEvent = getProtocolPrefix(fromProvider) === MODEL_PROTOCOL_PREFIX.CLAUDE || getProtocolPrefix(fromProvider) === MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES;
 
         for await (const nativeChunk of nativeStream) {
@@ -604,10 +624,22 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         // 凭证已被标记为不健康后，尝试切换到新凭证重试
         // 不再依赖状态码判断，只要凭证被标记不健康且可以重试，就尝试切换
         if (credentialMarkedUnhealthy && currentRetry < maxRetries && providerPoolManager && CONFIG) {
+            if (clientDisconnected.value || upstreamAbortController.signal.aborted) {
+                logger.info('[Stream Retry] Skipping credential retry because client is disconnected');
+                responseClosed = true;
+                return;
+            }
+
             // 增加10秒内的随机等待时间，避免所有请求同时切换凭证
             const randomDelay = Math.floor(Math.random() * 10000); // 0-10000毫秒
             logger.info(`[Stream Retry] Credential marked unhealthy. Waiting ${randomDelay}ms before retry ${currentRetry + 1}/${maxRetries} with different credential...`);
             await new Promise(resolve => setTimeout(resolve, randomDelay));
+
+            if (clientDisconnected.value || upstreamAbortController.signal.aborted) {
+                logger.info('[Stream Retry] Client disconnected during retry backoff, aborting credential switch');
+                responseClosed = true;
+                return;
+            }
             
             try {
                 // 动态导入以避免循环依赖
@@ -625,7 +657,8 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                         currentRetry: currentRetry + 1,
                         maxRetries,
                         clientDisconnected,  // 传递断开状态
-                        anyDataSent          // 传递数据发送状态
+                        anyDataSent,         // 传递数据发送状态
+                        upstreamAbortController
                     };
                     
                     // 递归调用，使用新的服务

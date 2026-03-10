@@ -357,6 +357,46 @@ describe('Gemini fixed IP rotation transport', () => {
         expect(service.fixedIpPreferredByModelHostname.get('cloudcode-pa.googleapis.com|gemini-3.1-pro-preview')).toBe('2.2.2.2');
     });
 
+    test('stops stream retries after the caller aborts during quota backoff', async () => {
+        const service = createService({
+            REQUEST_MAX_RETRIES: 3,
+            REQUEST_BASE_DELAY: 200,
+        });
+        const controller = new AbortController();
+        const rateLimitError = new Error('Too many requests');
+        rateLimitError.response = {
+            status: 429,
+            data: { error: { message: 'Too many requests' } },
+        };
+
+        service.authClient.request = jest.fn(async (requestOptions) => {
+            expect(requestOptions.signal).toBe(controller.signal);
+            throw rateLimitError;
+        });
+
+        const consumePromise = (async () => {
+            for await (const _chunk of service.streamApi(
+                'streamGenerateContent',
+                {
+                    model: 'gemini-3-flash-preview',
+                    project: 'project-id',
+                    request: { contents: [] },
+                },
+                false,
+                0,
+                controller.signal
+            )) {
+                // no-op
+            }
+        })();
+
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        controller.abort();
+
+        await expect(consumePromise).rejects.toMatchObject({ code: 'AbortError' });
+        expect(service.authClient.request).toHaveBeenCalledTimes(1);
+    });
+
     test('race mode returns the upstream retryable error after exhausting rounds when DNS fallback is disabled', async () => {
         const service = createService({
             GEMINI_FIXED_IP_RACE_ENABLED: true,

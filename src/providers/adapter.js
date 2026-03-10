@@ -113,12 +113,12 @@ export class GeminiApiServiceAdapter extends ApiServiceAdapter {
         return this.geminiApiService.generateContent(model, requestBody);
     }
 
-    async *generateContentStream(model, requestBody) {
+    async *generateContentStream(model, requestBody, options = {}) {
         if (!this.geminiApiService.isInitialized) {
             logger.warn("geminiApiService not initialized, attempting to re-initialize...");
             await this.geminiApiService.initialize();
         }
-        yield* this.geminiApiService.generateContentStream(model, requestBody);
+        yield* this.geminiApiService.generateContentStream(model, requestBody, options);
     }
 
     async listModels() {
