@@ -359,25 +359,40 @@ function parseDurationToMs(rawDuration) {
     return Math.max(0, Math.round(ms));
 }
 
-function parseRetryAfterHeaderMs(headers) {
-    if (!headers) {
+function getResponseHeaderValue(headers, headerName) {
+    if (!headers || !headerName) {
         return null;
     }
 
-    let retryAfterValue;
+    const normalizedHeaderName = String(headerName).toLowerCase();
+    let headerValue;
+
     if (typeof headers.get === 'function') {
-        retryAfterValue = headers.get('retry-after');
+        headerValue = headers.get(normalizedHeaderName);
     } else if (Array.isArray(headers)) {
-        const retryAfterEntry = headers.find((entry) => Array.isArray(entry) && String(entry[0]).toLowerCase() === 'retry-after');
-        retryAfterValue = retryAfterEntry ? retryAfterEntry[1] : undefined;
+        const headerEntry = headers.find((entry) =>
+            Array.isArray(entry) && String(entry[0]).toLowerCase() === normalizedHeaderName);
+        headerValue = headerEntry ? headerEntry[1] : undefined;
     } else if (typeof headers === 'object') {
-        retryAfterValue = headers['retry-after'] ?? headers['Retry-After'];
+        const matchedHeaderKey = Object.keys(headers)
+            .find((key) => String(key).toLowerCase() === normalizedHeaderName);
+        headerValue = matchedHeaderKey ? headers[matchedHeaderKey] : undefined;
     }
 
-    if (Array.isArray(retryAfterValue)) {
-        retryAfterValue = retryAfterValue[0];
+    if (Array.isArray(headerValue)) {
+        headerValue = headerValue[0];
     }
 
+    if (headerValue === undefined || headerValue === null) {
+        return null;
+    }
+
+    const normalizedValue = String(headerValue).trim();
+    return normalizedValue || null;
+}
+
+function parseRetryAfterHeaderMs(headers) {
+    const retryAfterValue = getResponseHeaderValue(headers, 'retry-after');
     if (retryAfterValue === undefined || retryAfterValue === null) {
         return null;
     }
@@ -402,6 +417,11 @@ function parseRetryAfterHeaderMs(headers) {
     }
 
     return null;
+}
+
+function formatServerTimingLogSuffix(headers) {
+    const serverTiming = getResponseHeaderValue(headers, 'server-timing');
+    return serverTiming ? ` | Server-Timing=${serverTiming}` : '';
 }
 
 function extractRetryDelayFromPayloadMs(payload) {
@@ -1331,6 +1351,9 @@ export class GeminiApiService {
                 const rotateQuotaExhausted = decision.reason === '429-quota-exhausted' &&
                     shouldRotateGeminiQuotaExhaustedFixedIp(model);
                 const error = this._createFixedIpResponseError(attemptOptions, response);
+                const serverTimingSuffix = response?.status === 429
+                    ? formatServerTimingLogSuffix(response?.headers)
+                    : '';
 
                 if (decision.reason === '429-no-capacity' && !this.fixedIpRaceDisableCooldown) {
                     this._markFixedIpCooldown(hostname, fixedIp, decision.reason, model);
@@ -1338,7 +1361,7 @@ export class GeminiApiService {
 
                 if (rotateQuotaExhausted || decision.action === 'rotate') {
                     this._clearPreferredFixedIp(hostname, fixedIp, decision.reason, model);
-                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} race round ${roundNumber}/${totalRounds} failed via fixed IP ${fixedIp} (${decision.reason}, status=${response.status}).`);
+                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} race round ${roundNumber}/${totalRounds} failed via fixed IP ${fixedIp} (${decision.reason}, status=${response.status}).${serverTimingSuffix}`);
                     return {
                         type: 'retryable-response',
                         error,
@@ -1346,9 +1369,9 @@ export class GeminiApiService {
                 }
 
                 if (decision.reason === '429-quota-exhausted') {
-                    logger.info(`[Gemini IP] ${hostname}${modelSuffix} fixed IP ${fixedIp} returned quota exhaustion during race round ${roundNumber}/${totalRounds}. Stopping race and falling back to the existing quota handling.`);
+                    logger.info(`[Gemini IP] ${hostname}${modelSuffix} fixed IP ${fixedIp} returned quota exhaustion during race round ${roundNumber}/${totalRounds}. Stopping race and falling back to the existing quota handling.${serverTimingSuffix}`);
                 } else {
-                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} fixed IP ${fixedIp} returned non-rotatable status ${response.status} (${decision.reason}) during race round ${roundNumber}/${totalRounds}.`);
+                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} fixed IP ${fixedIp} returned non-rotatable status ${response.status} (${decision.reason}) during race round ${roundNumber}/${totalRounds}.${serverTimingSuffix}`);
                 }
 
                 return {
@@ -1566,6 +1589,9 @@ export class GeminiApiService {
                 const rotateQuotaExhausted = decision.reason === '429-quota-exhausted' &&
                     hasNextIp &&
                     shouldRotateGeminiQuotaExhaustedFixedIp(model);
+                const serverTimingSuffix = response?.status === 429
+                    ? formatServerTimingLogSuffix(response?.headers)
+                    : '';
 
                 if (decision.reason === '429-no-capacity') {
                     this._markFixedIpCooldown(hostname, fixedIp, decision.reason, model);
@@ -1573,7 +1599,7 @@ export class GeminiApiService {
 
                 if (rotateQuotaExhausted) {
                     this._clearPreferredFixedIp(hostname, fixedIp, decision.reason, model);
-                    logger.warn(`[Gemini IP] ${hostname} fixed IP ${fixedIp} returned quota exhaustion for model ${model}. Trying the next fixed IP (${attemptIndex + 2}/${candidateIps.length}) before falling back to the project's retry/quota handling.`);
+                    logger.warn(`[Gemini IP] ${hostname} fixed IP ${fixedIp} returned quota exhaustion for model ${model}. Trying the next fixed IP (${attemptIndex + 2}/${candidateIps.length}) before falling back to the project's retry/quota handling.${serverTimingSuffix}`);
                     lastResponseError = this._createFixedIpResponseError(attemptOptions, response);
                     continue;
                 }
@@ -1581,17 +1607,17 @@ export class GeminiApiService {
                 if (decision.action === 'rotate' && hasNextIp) {
                     this._clearPreferredFixedIp(hostname, fixedIp, decision.reason, model);
                     const modelSuffix = model ? ` for model ${model}` : '';
-                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} returned ${response.status} via fixed IP ${fixedIp} (${decision.reason}). Switching to next fixed IP (${attemptIndex + 2}/${candidateIps.length}).`);
+                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} returned ${response.status} via fixed IP ${fixedIp} (${decision.reason}). Switching to next fixed IP (${attemptIndex + 2}/${candidateIps.length}).${serverTimingSuffix}`);
                     lastResponseError = this._createFixedIpResponseError(attemptOptions, response);
                     continue;
                 }
 
                 if (decision.reason === '429-quota-exhausted') {
                     const modelSuffix = model ? ` for model ${model}` : '';
-                    logger.info(`[Gemini IP] ${hostname}${modelSuffix} fixed IP ${fixedIp} returned quota exhaustion. Falling back to the project's existing retry/quota handling.`);
+                    logger.info(`[Gemini IP] ${hostname}${modelSuffix} fixed IP ${fixedIp} returned quota exhaustion. Falling back to the project's existing retry/quota handling.${serverTimingSuffix}`);
                 } else if (decision.action === 'rotate') {
                     const modelSuffix = model ? ` for model ${model}` : '';
-                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} still returned ${response.status} via fixed IP ${fixedIp} after exhausting fixed IP candidates.`);
+                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} still returned ${response.status} via fixed IP ${fixedIp} after exhausting fixed IP candidates.${serverTimingSuffix}`);
                 }
 
                 throw this._createFixedIpResponseError(attemptOptions, response);
@@ -1915,11 +1941,14 @@ export class GeminiApiService {
             const errorCode = error.code;
             const errorMessage = error.message || '';
             const errorDetails = error.response?.data;
+            const serverTimingSuffix = status === 429
+                ? formatServerTimingLogSuffix(error?.response?.headers)
+                : '';
             
             // 检查是否为可重试的网络错误
             const isNetworkError = isRetryableNetworkError(error);
             
-            logger.error(`[Gemini API] Error calling (Status: ${status}, Code: ${errorCode}):`, errorMessage);
+            logger.error(`[Gemini API] Error calling (Status: ${status}, Code: ${errorCode})${serverTimingSuffix}:`, errorMessage);
             if (errorDetails) {
                 try {
                     logger.error(`[Gemini API] Upstream error details: ${JSON.stringify(errorDetails)}`);
@@ -1953,7 +1982,7 @@ export class GeminiApiService {
                 const quotaRetryDelayHintMs = getQuotaRetryDelayHintMs(error);
                 const delay = computeQuotaRetryDelayMs(baseDelay, retryCount, quotaRetryDelayHintMs);
                 const hintLog = quotaRetryDelayHintMs !== null ? ` (server hint >= ${Math.round(quotaRetryDelayHintMs)}ms)` : '';
-                logger.info(`[Gemini API] Received 429 (Too Many Requests). Retrying in ${delay}ms${hintLog}... (attempt ${retryCount + 1}/${maxRetries})`);
+                logger.info(`[Gemini API] Received 429 (Too Many Requests). Retrying in ${delay}ms${hintLog}... (attempt ${retryCount + 1}/${maxRetries})${serverTimingSuffix}`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 return this.callApi(method, body, isRetry, retryCount + 1);
             }
@@ -2028,6 +2057,9 @@ export class GeminiApiService {
             const errorCode = error.code;
             const errorMessage = error.message || '';
             const errorDetails = error.response?.data;
+            const serverTimingSuffix = status === 429
+                ? formatServerTimingLogSuffix(error?.response?.headers)
+                : '';
             
             if (signal?.aborted || isRetryableAbortError(error)) {
                 throw error;
@@ -2036,7 +2068,7 @@ export class GeminiApiService {
             // 检查是否为可重试的网络错误
             const isNetworkError = isRetryableNetworkError(error);
             
-            logger.error(`[Gemini API] Error during stream (Status: ${status}, Code: ${errorCode}):`, errorMessage);
+            logger.error(`[Gemini API] Error during stream (Status: ${status}, Code: ${errorCode})${serverTimingSuffix}:`, errorMessage);
             if (errorDetails) {
                 try {
                     logger.error(`[Gemini API] Upstream stream error details: ${JSON.stringify(errorDetails)}`);
@@ -2070,7 +2102,7 @@ export class GeminiApiService {
                 const quotaRetryDelayHintMs = getQuotaRetryDelayHintMs(error);
                 const delay = computeQuotaRetryDelayMs(baseDelay, retryCount, quotaRetryDelayHintMs);
                 const hintLog = quotaRetryDelayHintMs !== null ? ` (server hint >= ${Math.round(quotaRetryDelayHintMs)}ms)` : '';
-                logger.info(`[Gemini API] Received 429 (Too Many Requests) during stream. Retrying in ${delay}ms${hintLog}... (attempt ${retryCount + 1}/${maxRetries})`);
+                logger.info(`[Gemini API] Received 429 (Too Many Requests) during stream. Retrying in ${delay}ms${hintLog}... (attempt ${retryCount + 1}/${maxRetries})${serverTimingSuffix}`);
                 await waitWithAbort(delay, signal);
                 yield* this.streamApi(method, body, isRetry, retryCount + 1, signal);
                 return;

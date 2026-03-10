@@ -71,25 +71,40 @@ function parseDurationToMs(rawDuration) {
     return Math.max(0, Math.round(ms));
 }
 
-function parseRetryAfterHeaderMs(headers) {
-    if (!headers) {
+function getResponseHeaderValue(headers, headerName) {
+    if (!headers || !headerName) {
         return null;
     }
 
-    let retryAfterValue;
+    const normalizedHeaderName = String(headerName).toLowerCase();
+    let headerValue;
+
     if (typeof headers.get === 'function') {
-        retryAfterValue = headers.get('retry-after');
+        headerValue = headers.get(normalizedHeaderName);
     } else if (Array.isArray(headers)) {
-        const retryAfterEntry = headers.find((entry) => Array.isArray(entry) && String(entry[0]).toLowerCase() === 'retry-after');
-        retryAfterValue = retryAfterEntry ? retryAfterEntry[1] : undefined;
+        const headerEntry = headers.find((entry) =>
+            Array.isArray(entry) && String(entry[0]).toLowerCase() === normalizedHeaderName);
+        headerValue = headerEntry ? headerEntry[1] : undefined;
     } else if (typeof headers === 'object') {
-        retryAfterValue = headers['retry-after'] ?? headers['Retry-After'];
+        const matchedHeaderKey = Object.keys(headers)
+            .find((key) => String(key).toLowerCase() === normalizedHeaderName);
+        headerValue = matchedHeaderKey ? headers[matchedHeaderKey] : undefined;
     }
 
-    if (Array.isArray(retryAfterValue)) {
-        retryAfterValue = retryAfterValue[0];
+    if (Array.isArray(headerValue)) {
+        headerValue = headerValue[0];
     }
 
+    if (headerValue === undefined || headerValue === null) {
+        return null;
+    }
+
+    const normalizedValue = String(headerValue).trim();
+    return normalizedValue || null;
+}
+
+function parseRetryAfterHeaderMs(headers) {
+    const retryAfterValue = getResponseHeaderValue(headers, 'retry-after');
     if (retryAfterValue === undefined || retryAfterValue === null) {
         return null;
     }
@@ -114,6 +129,11 @@ function parseRetryAfterHeaderMs(headers) {
     }
 
     return null;
+}
+
+function formatServerTimingLogSuffix(headers) {
+    const serverTiming = getResponseHeaderValue(headers, 'server-timing');
+    return serverTiming ? ` | Server-Timing=${serverTiming}` : '';
 }
 
 function extractRetryDelayFromPayloadMs(payload) {
@@ -1302,11 +1322,14 @@ export class AntigravityApiService {
             const status = error.response?.status;
             const errorCode = error.code;
             const errorMessage = error.message || '';
+            const serverTimingSuffix = status === 429
+                ? formatServerTimingLogSuffix(error?.response?.headers)
+                : '';
             
             // 检查是否为可重试的网络错误
             const isNetworkError = isRetryableNetworkError(error);
             
-            logger.error(`[Antigravity API] Error calling (Status: ${status}, Code: ${errorCode}):`, error.message);
+            logger.error(`[Antigravity API] Error calling (Status: ${status}, Code: ${errorCode})${serverTimingSuffix}:`, error.message);
 
             if ((status === 400 || status === 401) && !isRetry) {
                 logger.info('[Antigravity API] Received 401/400. Triggering background refresh via PoolManager...');
@@ -1329,13 +1352,13 @@ export class AntigravityApiService {
 
             if (status === 429) {
                 if (baseURLIndex + 1 < this.baseURLs.length) {
-                    logger.info(`[Antigravity API] Rate limited on ${baseURL}. Trying next base URL...`);
+                    logger.info(`[Antigravity API] Rate limited on ${baseURL}. Trying next base URL...${serverTimingSuffix}`);
                     return this.callApi(method, body, isRetry, retryCount, baseURLIndex + 1);
                 } else if (retryCount < maxRetries) {
                     const quotaRetryDelayHintMs = getQuotaRetryDelayHintMs(error);
                     const delay = computeQuotaRetryDelayMs(baseDelay, retryCount, quotaRetryDelayHintMs);
                     const hintLog = quotaRetryDelayHintMs !== null ? ` (server hint >= ${Math.round(quotaRetryDelayHintMs)}ms)` : '';
-                    logger.info(`[Antigravity API] Rate limited. Retrying in ${delay}ms${hintLog}...`);
+                    logger.info(`[Antigravity API] Rate limited. Retrying in ${delay}ms${hintLog}...${serverTimingSuffix}`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     return this.callApi(method, body, isRetry, retryCount + 1, 0);
                 }
@@ -1419,11 +1442,14 @@ export class AntigravityApiService {
             const status = error.response?.status;
             const errorCode = error.code;
             const errorMessage = error.message || '';
+            const serverTimingSuffix = status === 429
+                ? formatServerTimingLogSuffix(error?.response?.headers)
+                : '';
             
             // 检查是否为可重试的网络错误
             const isNetworkError = isRetryableNetworkError(error);
             
-            logger.error(`[Antigravity API] Error during stream (Status: ${status}, Code: ${errorCode}):`, error.message);
+            logger.error(`[Antigravity API] Error during stream (Status: ${status}, Code: ${errorCode})${serverTimingSuffix}:`, error.message);
 
             if ((status === 400 || status === 401) && !isRetry) {
                 logger.info('[Antigravity API] Received 401/400 during stream. Triggering background refresh via PoolManager...');
@@ -1446,14 +1472,14 @@ export class AntigravityApiService {
 
             if (status === 429) {
                 if (baseURLIndex + 1 < this.baseURLs.length) {
-                    logger.info(`[Antigravity API] Rate limited on ${baseURL}. Trying next base URL...`);
+                    logger.info(`[Antigravity API] Rate limited on ${baseURL}. Trying next base URL...${serverTimingSuffix}`);
                     yield* this.streamApi(method, body, isRetry, retryCount, baseURLIndex + 1);
                     return;
                 } else if (retryCount < maxRetries) {
                     const quotaRetryDelayHintMs = getQuotaRetryDelayHintMs(error);
                     const delay = computeQuotaRetryDelayMs(baseDelay, retryCount, quotaRetryDelayHintMs);
                     const hintLog = quotaRetryDelayHintMs !== null ? ` (server hint >= ${Math.round(quotaRetryDelayHintMs)}ms)` : '';
-                    logger.info(`[Antigravity API] Rate limited during stream. Retrying in ${delay}ms${hintLog}...`);
+                    logger.info(`[Antigravity API] Rate limited during stream. Retrying in ${delay}ms${hintLog}...${serverTimingSuffix}`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     yield* this.streamApi(method, body, isRetry, retryCount + 1, 0);
                     return;
