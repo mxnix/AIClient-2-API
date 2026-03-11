@@ -48,6 +48,8 @@ const DEFAULT_FIXED_IP_RACE_CONCURRENCY = 1;
 const DEFAULT_FIXED_IP_RACE_ROUNDS = 3;
 const DEFAULT_FIXED_IP_RACE_REQUEST_DELAY_MS = 2000;
 const FIXED_IP_RACE_INTERNAL_ABORT = Symbol('gemini-fixed-ip-race-internal-abort');
+const BRAILLE_BLANK_CHAR = '\u2800';
+const GEMINI_REPLACE_SPACE_PROMPT = `[YOU MUST ALWAYS USE U+2800 BRAILLE PATTERN BLANK ("${BRAILLE_BLANK_CHAR}") INSTEAD OF SPACES (" "). Using spaces is strictly prohibited!]`;
 export const DEFAULT_GEMINI_FIXED_IPS = Object.freeze([
     '64.233.161.95',
     '142.250.65.74',
@@ -195,6 +197,78 @@ function isRetryableAbortError(error) {
 
     const errorText = `${error?.message || ''} ${error?.cause?.message || ''}`.toLowerCase();
     return RETRYABLE_ABORT_PATTERNS.some((pattern) => errorText.includes(pattern));
+}
+
+function isGeminiReplaceSpaceEnabled(value) {
+    return value === true || value === 'true';
+}
+
+function appendGeminiReplaceSpacePrompt(requestBody) {
+    if (!requestBody || typeof requestBody !== 'object') {
+        return requestBody;
+    }
+
+    const existingInstruction = requestBody.systemInstruction || requestBody.system_instruction || null;
+    const existingParts = Array.isArray(existingInstruction?.parts)
+        ? existingInstruction.parts.map((part) => (part && typeof part === 'object' ? { ...part } : part))
+        : [];
+
+    const hasPrompt = existingParts.some((part) =>
+        typeof part?.text === 'string' && part.text.includes(GEMINI_REPLACE_SPACE_PROMPT)
+    );
+
+    if (!hasPrompt) {
+        let lastTextPartIndex = -1;
+        for (let index = existingParts.length - 1; index >= 0; index -= 1) {
+            if (typeof existingParts[index]?.text === 'string') {
+                lastTextPartIndex = index;
+                break;
+            }
+        }
+
+        if (lastTextPartIndex >= 0) {
+            existingParts[lastTextPartIndex] = {
+                ...existingParts[lastTextPartIndex],
+                text: `${existingParts[lastTextPartIndex].text}\n${GEMINI_REPLACE_SPACE_PROMPT}`
+            };
+        } else {
+            existingParts.push({ text: GEMINI_REPLACE_SPACE_PROMPT });
+        }
+    }
+
+    requestBody.systemInstruction = {
+        ...(existingInstruction || {}),
+        role: existingInstruction?.role || 'user',
+        parts: existingParts
+    };
+
+    if (requestBody.system_instruction) {
+        delete requestBody.system_instruction;
+    }
+
+    return requestBody;
+}
+
+function cloneWithBrailleBlankReplaced(value) {
+    if (typeof value === 'string') {
+        return value.includes(BRAILLE_BLANK_CHAR)
+            ? value.replace(/\u2800/g, ' ')
+            : value;
+    }
+
+    if (Array.isArray(value)) {
+        return value.map((item) => cloneWithBrailleBlankReplaced(item));
+    }
+
+    if (value && typeof value === 'object') {
+        const cloned = {};
+        for (const [key, nestedValue] of Object.entries(value)) {
+            cloned[key] = cloneWithBrailleBlankReplaced(nestedValue);
+        }
+        return cloned;
+    }
+
+    return value;
 }
 
 function createAbortError(message = 'The operation was aborted.') {
@@ -850,7 +924,7 @@ async function* apply_anti_truncation_to_stream(service, model, requestBody, sig
         for await (const chunk of stream) {
             const response = toGeminiApiResponse(chunk.response);
             if (response && response.candidates && response.candidates[0]) {
-                yield response;
+                yield service._formatClientResponse(response);
                 lastChunk = response;
                 hasContent = true;
             }
@@ -913,6 +987,7 @@ export class GeminiApiService {
         this.projectId = config.PROJECT_ID;
         this.uuid = config.uuid;
         this.codeAssistEndpoint = config.GEMINI_BASE_URL || DEFAULT_CODE_ASSIST_ENDPOINT;
+        this.replaceSpaceEnabled = isGeminiReplaceSpaceEnabled(config.GEMINI_REPLACE_SPACE);
         this.apiVersion = DEFAULT_CODE_ASSIST_API_VERSION;
         this.proxyConfig = getProxyConfigForProvider(config, 'gemini-cli-oauth');
         this.fixedIpList = normalizeGeminiFixedIpList(config.GEMINI_FIXED_IPS);
@@ -2187,11 +2262,11 @@ export class GeminiApiService {
         if (selectedModel !== model) {
             logger.info(`[Gemini] Model normalized: '${model}' -> '${selectedModel}'`);
         }
-        const processedRequestBody = ensureRolesInContents(requestBody);
+        const processedRequestBody = this._prepareRequestBody(requestBody);
         ensureGeminiSessionId(processedRequestBody);
         const apiRequest = { model: selectedModel, project: this.projectId, request: processedRequestBody };
         const response = await this.callApi(API_ACTIONS.GENERATE_CONTENT, apiRequest);
-        return toGeminiApiResponse(response.response);
+        return this._formatClientResponse(toGeminiApiResponse(response.response));
     }
 
     async * generateContentStream(model, requestBody, options = {}) {
@@ -2230,7 +2305,7 @@ export class GeminiApiService {
                 throw createUnsupportedModelError(model, `anti-${actualModel}`);
             }
             // 使用防截断流处理
-            const processedRequestBody = ensureRolesInContents(requestBody);
+            const processedRequestBody = this._prepareRequestBody(requestBody);
             ensureGeminiSessionId(processedRequestBody);
             yield* apply_anti_truncation_to_stream(this, actualModel, processedRequestBody, signal);
         } else {
@@ -2244,14 +2319,30 @@ export class GeminiApiService {
             if (selectedModel !== model) {
                 logger.info(`[Gemini] Model normalized: '${model}' -> '${selectedModel}'`);
             }
-            const processedRequestBody = ensureRolesInContents(requestBody);
+            const processedRequestBody = this._prepareRequestBody(requestBody);
             ensureGeminiSessionId(processedRequestBody);
             const apiRequest = this._buildCodeAssistGenerateRequest(selectedModel, processedRequestBody, monitorRequestId);
             const stream = this.streamApi(API_ACTIONS.STREAM_GENERATE_CONTENT, apiRequest, false, 0, signal);
             for await (const chunk of stream) {
-                yield toGeminiApiResponse(chunk.response);
+                yield this._formatClientResponse(toGeminiApiResponse(chunk.response));
             }
         }
+    }
+
+    _prepareRequestBody(requestBody) {
+        const processedRequestBody = ensureRolesInContents(requestBody);
+        if (this.replaceSpaceEnabled) {
+            appendGeminiReplaceSpacePrompt(processedRequestBody);
+        }
+        return processedRequestBody;
+    }
+
+    _formatClientResponse(response) {
+        if (!this.replaceSpaceEnabled || !response) {
+            return response;
+        }
+
+        return cloneWithBrailleBlankReplaced(response);
     }
 
      /**

@@ -523,8 +523,26 @@ function renderProviderConfig(provider) {
         const field1IsOAuthFilePath = field1Key.includes('OAUTH_CREDS_FILE_PATH');
         const field1DisplayValue = field1IsPassword && field1Value ? '••••••••' : ((field1Value !== undefined && field1Value !== null) ? field1Value : '');
         const field1Def = fieldConfigs.find(f => f.id === field1Key) || fieldConfigs.find(f => f.id.toUpperCase() === field1Key.toUpperCase()) || {};
+        const field1ActualValue = (field1Value !== undefined && field1Value !== null)
+            ? String(field1Value)
+            : (field1Def.defaultValue !== undefined ? String(field1Def.defaultValue) : '');
         
-        if (field1IsPassword) {
+        if (field1Def.type === 'select') {
+            const field1Options = Array.isArray(field1Def.options) ? field1Def.options : [];
+            html += `
+                <div class="config-item">
+                    <label>${field1Label}</label>
+                    <select class="form-control"
+                            data-config-key="${field1Key}"
+                            data-config-value="${field1ActualValue}"
+                            disabled>
+                        ${field1Options.map(option => `
+                            <option value="${option.value}" ${field1ActualValue === String(option.value) ? 'selected' : ''}>${option.label}</option>
+                        `).join('')}
+                    </select>
+                </div>
+            `;
+        } else if (field1IsPassword) {
             html += `
                 <div class="config-item">
                     <label>${field1Label}</label>
@@ -585,8 +603,26 @@ function renderProviderConfig(provider) {
             const field2IsOAuthFilePath = field2Key.includes('OAUTH_CREDS_FILE_PATH');
             const field2DisplayValue = field2IsPassword && field2Value ? '••••••••' : ((field2Value !== undefined && field2Value !== null) ? field2Value : '');
             const field2Def = fieldConfigs.find(f => f.id === field2Key) || fieldConfigs.find(f => f.id.toUpperCase() === field2Key.toUpperCase()) || {};
+            const field2ActualValue = (field2Value !== undefined && field2Value !== null)
+                ? String(field2Value)
+                : (field2Def.defaultValue !== undefined ? String(field2Def.defaultValue) : '');
             
-            if (field2IsPassword) {
+            if (field2Def.type === 'select') {
+                const field2Options = Array.isArray(field2Def.options) ? field2Def.options : [];
+                html += `
+                    <div class="config-item">
+                        <label>${field2Label}</label>
+                        <select class="form-control"
+                                data-config-key="${field2Key}"
+                                data-config-value="${field2ActualValue}"
+                                disabled>
+                            ${field2Options.map(option => `
+                                <option value="${option.value}" ${field2ActualValue === String(option.value) ? 'selected' : ''}>${option.label}</option>
+                            `).join('')}
+                        </select>
+                    </div>
+                `;
+            } else if (field2IsPassword) {
                 html += `
                     <div class="config-item">
                         <label>${field2Label}</label>
@@ -682,7 +718,7 @@ function getFieldOrder(provider) {
         'openai-custom': ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
         'openaiResponses-custom': ['OPENAI_API_KEY', 'OPENAI_BASE_URL'],
         'claude-custom': ['CLAUDE_API_KEY', 'CLAUDE_BASE_URL'],
-        'gemini-cli-oauth': ['PROJECT_ID', 'GEMINI_OAUTH_CREDS_FILE_PATH', 'GEMINI_BASE_URL'],
+        'gemini-cli-oauth': ['PROJECT_ID', 'GEMINI_OAUTH_CREDS_FILE_PATH', 'GEMINI_BASE_URL', 'GEMINI_REPLACE_SPACE'],
         'claude-kiro-oauth': ['KIRO_OAUTH_CREDS_FILE_PATH', 'KIRO_BASE_URL', 'KIRO_REFRESH_URL', 'KIRO_REFRESH_IDC_URL'],
         'openai-qwen-oauth': ['QWEN_OAUTH_CREDS_FILE_PATH', 'QWEN_BASE_URL', 'QWEN_OAUTH_BASE_URL'],
         'gemini-antigravity': ['PROJECT_ID', 'ANTIGRAVITY_OAUTH_CREDS_FILE_PATH', 'ANTIGRAVITY_BASE_URL_DAILY', 'ANTIGRAVITY_BASE_URL_AUTOPUSH'],
@@ -892,11 +928,32 @@ function cancelEdit(uuid, event) {
  * @param {string} uuid - 提供商UUID
  * @param {Event} event - 事件对象
  */
+function normalizeSelectConfigValue(fieldKey, rawValue, fieldDef = null) {
+    const optionValues = Array.isArray(fieldDef?.options)
+        ? fieldDef.options.map(option => String(option.value))
+        : [];
+    const isBooleanSelect = fieldKey === 'checkHealth' ||
+        (optionValues.length > 0 && optionValues.every(value => value === 'true' || value === 'false'));
+
+    if (isBooleanSelect) {
+        if (rawValue === 'true') {
+            return true;
+        }
+        if (rawValue === 'false') {
+            return false;
+        }
+    }
+
+    return rawValue || '';
+}
+
 async function saveProvider(uuid, event) {
     event.stopPropagation();
     
     const providerDetail = event.target.closest('.provider-item-detail');
     const providerType = providerDetail.closest('.provider-modal').getAttribute('data-provider-type');
+    const providerFieldConfigs = getProviderTypeFields(providerType);
+    const providerFieldConfigMap = new Map(providerFieldConfigs.map(field => [field.id, field]));
     
     const configInputs = providerDetail.querySelectorAll('input[data-config-key]');
     const configSelects = providerDetail.querySelectorAll('select[data-config-key]');
@@ -913,8 +970,8 @@ async function saveProvider(uuid, event) {
     
     configSelects.forEach(select => {
         const key = select.dataset.configKey;
-        const value = select.value === 'true';
-        providerConfig[key] = value;
+        const fieldDef = providerFieldConfigMap.get(key);
+        providerConfig[key] = normalizeSelectConfigValue(key, select.value, fieldDef);
     });
     
     // 收集不支持的模型列表
@@ -1159,8 +1216,12 @@ function addDynamicConfigFields(form, providerType) {
             const field1 = filteredFields[i];
             // 检查是否为密码类型字段
             const isPassword1 = field1.type === 'password';
+            const isSelect1 = field1.type === 'select';
             // 检查是否为OAuth凭据文件路径字段（兼容两种命名方式）
             const isOAuthFilePath1 = field1.id.includes('OAUTH_CREDS_FILE_PATH') || field1.id.includes('OauthCredsFilePath');
+            const field1SelectedValue = field1.value !== undefined
+                ? String(field1.value)
+                : (field1.defaultValue !== undefined ? String(field1.defaultValue) : '');
             
             if (isPassword1) {
                 fields += `
@@ -1177,18 +1238,29 @@ function addDynamicConfigFields(form, providerType) {
             } else if (isOAuthFilePath1) {
                 // OAuth凭据文件路径字段，添加上传按钮
                 const isKiroField = field1.id.includes('KIRO');
-    fields += `
-        <div class="form-group">
-            <label>${field1.label}</label>
-            <div class="file-input-group">
-                <input type="text" id="new${field1.id}" class="form-control" placeholder="${field1.placeholder || ''}" value="${field1.value || ''}">
-                <button type="button" class="btn btn-outline upload-btn" data-target="new${field1.id}" aria-label="上传文件">
-                    <i class="fas fa-upload"></i>
-                </button>
-            </div>
-            ${isKiroField ? '<small class="form-text"><i class="fas fa-info-circle"></i> ' + t('modal.provider.kiroAuthHint') + '</small>' : ''}
-        </div>
-    `;
+                fields += `
+                    <div class="form-group">
+                        <label>${field1.label}</label>
+                        <div class="file-input-group">
+                            <input type="text" id="new${field1.id}" class="form-control" placeholder="${field1.placeholder || ''}" value="${field1.value || ''}">
+                            <button type="button" class="btn btn-outline upload-btn" data-target="new${field1.id}" aria-label="上传文件">
+                                <i class="fas fa-upload"></i>
+                            </button>
+                        </div>
+                        ${isKiroField ? '<small class="form-text"><i class="fas fa-info-circle"></i> ' + t('modal.provider.kiroAuthHint') + '</small>' : ''}
+                    </div>
+                `;
+            } else if (isSelect1) {
+                fields += `
+                    <div class="form-group">
+                        <label>${field1.label}</label>
+                        <select id="new${field1.id}" class="form-control">
+                            ${(field1.options || []).map(option => `
+                                <option value="${option.value}" ${field1SelectedValue === String(option.value) ? 'selected' : ''}>${option.label}</option>
+                            `).join('')}
+                        </select>
+                    </div>
+                `;
             } else {
                 fields += `
                     <div class="form-group">
@@ -1202,8 +1274,12 @@ function addDynamicConfigFields(form, providerType) {
             if (field2) {
                 // 检查是否为密码类型字段
                 const isPassword2 = field2.type === 'password';
+                const isSelect2 = field2.type === 'select';
                 // 检查是否为OAuth凭据文件路径字段（兼容两种命名方式）
                 const isOAuthFilePath2 = field2.id.includes('OAUTH_CREDS_FILE_PATH') || field2.id.includes('OauthCredsFilePath');
+                const field2SelectedValue = field2.value !== undefined
+                    ? String(field2.value)
+                    : (field2.defaultValue !== undefined ? String(field2.defaultValue) : '');
                 
                 if (isPassword2) {
                     fields += `
@@ -1220,18 +1296,29 @@ function addDynamicConfigFields(form, providerType) {
                 } else if (isOAuthFilePath2) {
                     // OAuth凭据文件路径字段，添加上传按钮
                     const isKiroField = field2.id.includes('KIRO');
-    fields += `
-        <div class="form-group">
-            <label>${field2.label}</label>
-            <div class="file-input-group">
-                <input type="text" id="new${field2.id}" class="form-control" placeholder="${field2.placeholder || ''}" value="${field2.value || ''}">
-                <button type="button" class="btn btn-outline upload-btn" data-target="new${field2.id}" aria-label="上传文件">
-                    <i class="fas fa-upload"></i>
-                </button>
-            </div>
-            ${isKiroField ? '<small class="form-text"><i class="fas fa-info-circle"></i> ' + t('modal.provider.kiroAuthHint') + '</small>' : ''}
-        </div>
-    `;
+                    fields += `
+                        <div class="form-group">
+                            <label>${field2.label}</label>
+                            <div class="file-input-group">
+                                <input type="text" id="new${field2.id}" class="form-control" placeholder="${field2.placeholder || ''}" value="${field2.value || ''}">
+                                <button type="button" class="btn btn-outline upload-btn" data-target="new${field2.id}" aria-label="上传文件">
+                                    <i class="fas fa-upload"></i>
+                                </button>
+                            </div>
+                            ${isKiroField ? '<small class="form-text"><i class="fas fa-info-circle"></i> ' + t('modal.provider.kiroAuthHint') + '</small>' : ''}
+                        </div>
+                    `;
+                } else if (isSelect2) {
+                    fields += `
+                        <div class="form-group">
+                            <label>${field2.label}</label>
+                            <select id="new${field2.id}" class="form-control">
+                                ${(field2.options || []).map(option => `
+                                    <option value="${option.value}" ${field2SelectedValue === String(option.value) ? 'selected' : ''}>${option.label}</option>
+                                `).join('')}
+                            </select>
+                        </div>
+                    `;
                 } else {
                     fields += `
                         <div class="form-group">
@@ -1300,7 +1387,11 @@ async function addProvider(providerType) {
     allFields.forEach(field => {
         const element = document.getElementById(`new${field.id}`);
         if (element) {
-            providerConfig[field.id] = element.value || '';
+            if (field.type === 'select') {
+                providerConfig[field.id] = normalizeSelectConfigValue(field.id, element.value, field);
+            } else {
+                providerConfig[field.id] = element.value || '';
+            }
         }
     });
     

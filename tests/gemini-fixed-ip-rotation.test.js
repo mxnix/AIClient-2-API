@@ -70,6 +70,177 @@ function createDelayedAdapterResult(requestOptions, delayMs, factory) {
 }
 
 describe('Gemini fixed IP rotation helpers', () => {
+    test('appends the braille blank prompt and normalizes non-stream responses when enabled', async () => {
+        const service = createService({ GEMINI_REPLACE_SPACE: true });
+        jest.spyOn(service, 'isExpiryDateNear').mockReturnValue(false);
+        service.callApi = jest.fn().mockResolvedValue({
+            response: {
+                candidates: [{
+                    content: {
+                        role: 'model',
+                        parts: [{ text: 'hello\u2800world' }],
+                    },
+                    finishReason: 'STOP',
+                }],
+            },
+        });
+
+        const requestBody = {
+            systemInstruction: {
+                parts: [{ text: 'Base system prompt.' }],
+            },
+            contents: [{
+                role: 'user',
+                parts: [{ text: 'Hi' }],
+            }],
+        };
+
+        const response = await service.generateContent('gemini-2.5-flash', requestBody);
+        const apiRequest = service.callApi.mock.calls[0][1];
+        const systemText = apiRequest.request.systemInstruction.parts[0].text;
+
+        expect(systemText).toContain('Base system prompt.');
+        expect(systemText).toContain('U+2800 BRAILLE PATTERN BLANK');
+        expect(response.candidates[0].content.parts[0].text).toBe('hello world');
+    });
+
+    test('preserves existing multipart system instructions and assigns a role when appending the prompt', async () => {
+        const service = createService({ GEMINI_REPLACE_SPACE: true });
+        jest.spyOn(service, 'isExpiryDateNear').mockReturnValue(false);
+        service.callApi = jest.fn().mockResolvedValue({
+            response: {
+                candidates: [{
+                    content: {
+                        role: 'model',
+                        parts: [{ text: 'hello\u2800world' }],
+                    },
+                    finishReason: 'STOP',
+                }],
+            },
+        });
+
+        await service.generateContent('gemini-2.5-flash', {
+            systemInstruction: {
+                parts: [
+                    { text: 'Base system prompt.' },
+                    { inlineData: { mimeType: 'text/plain', data: 'ZXhhbXBsZQ==' } },
+                    { text: 'Keep this instruction too.' },
+                ],
+            },
+            contents: [{
+                role: 'user',
+                parts: [{ text: 'Hi' }],
+            }],
+        });
+
+        const apiRequest = service.callApi.mock.calls[0][1];
+        const instruction = apiRequest.request.systemInstruction;
+
+        expect(instruction.role).toBe('user');
+        expect(instruction.parts[0]).toEqual({ text: 'Base system prompt.' });
+        expect(instruction.parts[1]).toEqual({ inlineData: { mimeType: 'text/plain', data: 'ZXhhbXBsZQ==' } });
+        expect(instruction.parts[2].text).toContain('Keep this instruction too.');
+        expect(instruction.parts[2].text).toContain('U+2800 BRAILLE PATTERN BLANK');
+    });
+
+    test('creates a default system instruction with user role when the feature is enabled', async () => {
+        const service = createService({ GEMINI_REPLACE_SPACE: true });
+        jest.spyOn(service, 'isExpiryDateNear').mockReturnValue(false);
+        service.callApi = jest.fn().mockResolvedValue({
+            response: {
+                candidates: [{
+                    content: {
+                        role: 'model',
+                        parts: [{ text: 'hello\u2800world' }],
+                    },
+                    finishReason: 'STOP',
+                }],
+            },
+        });
+
+        await service.generateContent('gemini-2.5-flash', {
+            contents: [{
+                role: 'user',
+                parts: [{ text: 'Hi' }],
+            }],
+        });
+
+        const apiRequest = service.callApi.mock.calls[0][1];
+
+        expect(apiRequest.request.systemInstruction.role).toBe('user');
+        expect(apiRequest.request.systemInstruction.parts).toEqual([
+            expect.objectContaining({
+                text: expect.stringContaining('U+2800 BRAILLE PATTERN BLANK')
+            })
+        ]);
+    });
+
+    test('keeps braille blanks untouched when the feature is disabled', async () => {
+        const service = createService();
+        jest.spyOn(service, 'isExpiryDateNear').mockReturnValue(false);
+        service.callApi = jest.fn().mockResolvedValue({
+            response: {
+                candidates: [{
+                    content: {
+                        role: 'model',
+                        parts: [{ text: 'hello\u2800world' }],
+                    },
+                    finishReason: 'STOP',
+                }],
+            },
+        });
+
+        const requestBody = {
+            systemInstruction: {
+                parts: [{ text: 'Base system prompt.' }],
+            },
+            contents: [{
+                role: 'user',
+                parts: [{ text: 'Hi' }],
+            }],
+        };
+
+        const response = await service.generateContent('gemini-2.5-flash', requestBody);
+        const apiRequest = service.callApi.mock.calls[0][1];
+
+        expect(apiRequest.request.systemInstruction.parts[0].text).toBe('Base system prompt.');
+        expect(response.candidates[0].content.parts[0].text).toBe('hello\u2800world');
+    });
+
+    test('normalizes stream chunks when the feature is enabled', async () => {
+        const service = createService({ GEMINI_REPLACE_SPACE: true });
+        jest.spyOn(service, 'isExpiryDateNear').mockReturnValue(false);
+        service.streamApi = jest.fn().mockImplementation(async function* () {
+            yield {
+                response: {
+                    candidates: [{
+                        content: {
+                            role: 'model',
+                            parts: [{ text: 'stream\u2800chunk' }],
+                        },
+                        finishReason: 'STOP',
+                    }],
+                },
+            };
+        });
+
+        const chunks = [];
+        for await (const chunk of service.generateContentStream('gemini-2.5-flash', {
+            contents: [{
+                role: 'user',
+                parts: [{ text: 'Hi' }],
+            }],
+        })) {
+            chunks.push(chunk);
+        }
+
+        const apiRequest = service.streamApi.mock.calls[0][1];
+        const systemText = apiRequest.request.systemInstruction.parts[0].text;
+
+        expect(systemText).toContain('U+2800 BRAILLE PATTERN BLANK');
+        expect(chunks[0].candidates[0].content.parts[0].text).toBe('stream chunk');
+    });
+
     test('builds candidate list with preferred IP first and deduplicated', () => {
         expect(buildGeminiIpCandidateSequence(['1.1.1.1', '2.2.2.2', '1.1.1.1'], '2.2.2.2'))
             .toEqual(['2.2.2.2', '1.1.1.1']);

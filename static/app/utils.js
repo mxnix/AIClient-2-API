@@ -162,6 +162,7 @@ function getFieldLabel(key) {
         'CLAUDE_BASE_URL': 'Claude Base URL',
         'PROJECT_ID': t('modal.provider.field.projectId'),
         'GEMINI_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
+        'GEMINI_REPLACE_SPACE': t('modal.provider.field.replaceSpace'),
         'KIRO_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
         'QWEN_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
         'ANTIGRAVITY_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
@@ -258,6 +259,16 @@ function getProviderTypeFields(providerType) {
                 label: `Gemini Base URL <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'https://cloudcode-pa.googleapis.com'
+            },
+            {
+                id: 'GEMINI_REPLACE_SPACE',
+                label: t('modal.provider.field.replaceSpace'),
+                type: 'select',
+                defaultValue: 'false',
+                options: [
+                    { value: 'false', label: t('modal.provider.disabled') },
+                    { value: 'true', label: t('modal.provider.enabled') }
+                ]
             }
         ],
         'claude-kiro-oauth': [
