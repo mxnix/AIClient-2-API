@@ -498,6 +498,110 @@ function formatServerTimingLogSuffix(headers) {
     return serverTiming ? ` | Server-Timing=${serverTiming}` : '';
 }
 
+const FIXED_IP_LOG_HEADER_NAMES = Object.freeze([
+    'content-type',
+    'server-timing',
+    'retry-after',
+    'x-guploader-uploadid',
+    'x-google-gfe-response-code',
+    'via',
+    'alt-svc',
+]);
+
+function summarizeGeminiLogText(value, maxLength = 320) {
+    const rawText = extractGeminiErrorText(value);
+    const normalizedText = typeof rawText === 'string'
+        ? rawText.replace(/\s+/g, ' ').trim()
+        : '';
+
+    if (!normalizedText) {
+        return '';
+    }
+
+    return normalizedText.length <= maxLength
+        ? normalizedText
+        : `${normalizedText.slice(0, maxLength - 3)}...`;
+}
+
+function formatGeminiLogPath(rawUrl) {
+    if (!rawUrl) {
+        return '';
+    }
+
+    try {
+        const parsedUrl = rawUrl instanceof URL ? rawUrl : new URL(rawUrl);
+        return `${parsedUrl.pathname || ''}${parsedUrl.search || ''}` || parsedUrl.toString();
+    } catch {
+        return String(rawUrl);
+    }
+}
+
+function pickGeminiLogHeaders(headers, headerNames = FIXED_IP_LOG_HEADER_NAMES) {
+    const pickedHeaders = {};
+    for (const headerName of headerNames) {
+        const headerValue = getResponseHeaderValue(headers, headerName);
+        if (!headerValue) {
+            continue;
+        }
+
+        pickedHeaders[headerName] = headerValue;
+    }
+
+    return pickedHeaders;
+}
+
+function shouldLogGeminiFixedIpFailureDetails(response, decision) {
+    const status = Number(response?.status);
+    if (!Number.isFinite(status)) {
+        return true;
+    }
+
+    if (status >= 500) {
+        return true;
+    }
+
+    return decision?.reason !== '429-no-capacity' && decision?.reason !== '429-quota-exhausted';
+}
+
+function buildGeminiFixedIpFailureLogContext(requestOptions, response, decision) {
+    const context = {
+        method: requestOptions?.method || 'POST',
+        path: formatGeminiLogPath(requestOptions?.url),
+        status: response?.status ?? null,
+        reason: decision?.reason || 'unknown',
+        fixedIp: requestOptions?._geminiFixedIp || null,
+    };
+
+    if (requestOptions?._geminiModel) {
+        context.model = requestOptions._geminiModel;
+    }
+
+    const upstreamError = response?.data?.error && typeof response.data.error === 'object'
+        ? response.data.error
+        : null;
+    const upstreamCode = upstreamError?.code;
+    if (upstreamCode !== undefined && upstreamCode !== null && upstreamCode !== '') {
+        context.upstreamCode = upstreamCode;
+    }
+
+    const upstreamStatus = upstreamError?.status;
+    if (typeof upstreamStatus === 'string' && upstreamStatus.trim()) {
+        context.upstreamStatus = upstreamStatus.trim();
+    }
+
+    const upstreamMessage = summarizeGeminiLogText(upstreamError || response?.data);
+    if (upstreamMessage) {
+        context.upstreamMessage = upstreamMessage;
+    }
+
+    const headers = pickGeminiLogHeaders(response?.headers);
+    if (Object.keys(headers).length > 0) {
+        context.headers = headers;
+    }
+
+    return context;
+}
+
 function extractRetryDelayFromPayloadMs(payload) {
     if (payload === undefined || payload === null) {
         return null;
@@ -1426,6 +1530,9 @@ export class GeminiApiService {
                 const rotateQuotaExhausted = decision.reason === '429-quota-exhausted' &&
                     shouldRotateGeminiQuotaExhaustedFixedIp(model);
                 const error = this._createFixedIpResponseError(attemptOptions, response);
+                const failureLogContext = shouldLogGeminiFixedIpFailureDetails(response, decision)
+                    ? buildGeminiFixedIpFailureLogContext(attemptOptions, response, decision)
+                    : null;
                 const serverTimingSuffix = response?.status === 429
                     ? formatServerTimingLogSuffix(response?.headers)
                     : '';
@@ -1436,7 +1543,11 @@ export class GeminiApiService {
 
                 if (rotateQuotaExhausted || decision.action === 'rotate') {
                     this._clearPreferredFixedIp(hostname, fixedIp, decision.reason, model);
-                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} race round ${roundNumber}/${totalRounds} failed via fixed IP ${fixedIp} (${decision.reason}, status=${response.status}).${serverTimingSuffix}`);
+                    if (failureLogContext) {
+                        logger.warn(`[Gemini IP] ${hostname}${modelSuffix} race round ${roundNumber}/${totalRounds} failed via fixed IP ${fixedIp} (${decision.reason}, status=${response.status}).${serverTimingSuffix}`, failureLogContext);
+                    } else {
+                        logger.warn(`[Gemini IP] ${hostname}${modelSuffix} race round ${roundNumber}/${totalRounds} failed via fixed IP ${fixedIp} (${decision.reason}, status=${response.status}).${serverTimingSuffix}`);
+                    }
                     return {
                         type: 'retryable-response',
                         error,
@@ -1446,7 +1557,11 @@ export class GeminiApiService {
                 if (decision.reason === '429-quota-exhausted') {
                     logger.info(`[Gemini IP] ${hostname}${modelSuffix} fixed IP ${fixedIp} returned quota exhaustion during race round ${roundNumber}/${totalRounds}. Stopping race and falling back to the existing quota handling.${serverTimingSuffix}`);
                 } else {
-                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} fixed IP ${fixedIp} returned non-rotatable status ${response.status} (${decision.reason}) during race round ${roundNumber}/${totalRounds}.${serverTimingSuffix}`);
+                    if (failureLogContext) {
+                        logger.warn(`[Gemini IP] ${hostname}${modelSuffix} fixed IP ${fixedIp} returned non-rotatable status ${response.status} (${decision.reason}) during race round ${roundNumber}/${totalRounds}.${serverTimingSuffix}`, failureLogContext);
+                    } else {
+                        logger.warn(`[Gemini IP] ${hostname}${modelSuffix} fixed IP ${fixedIp} returned non-rotatable status ${response.status} (${decision.reason}) during race round ${roundNumber}/${totalRounds}.${serverTimingSuffix}`);
+                    }
                 }
 
                 return {
@@ -1664,6 +1779,9 @@ export class GeminiApiService {
                 const rotateQuotaExhausted = decision.reason === '429-quota-exhausted' &&
                     hasNextIp &&
                     shouldRotateGeminiQuotaExhaustedFixedIp(model);
+                const failureLogContext = shouldLogGeminiFixedIpFailureDetails(response, decision)
+                    ? buildGeminiFixedIpFailureLogContext(attemptOptions, response, decision)
+                    : null;
                 const serverTimingSuffix = response?.status === 429
                     ? formatServerTimingLogSuffix(response?.headers)
                     : '';
@@ -1682,7 +1800,11 @@ export class GeminiApiService {
                 if (decision.action === 'rotate' && hasNextIp) {
                     this._clearPreferredFixedIp(hostname, fixedIp, decision.reason, model);
                     const modelSuffix = model ? ` for model ${model}` : '';
-                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} returned ${response.status} via fixed IP ${fixedIp} (${decision.reason}). Switching to next fixed IP (${attemptIndex + 2}/${candidateIps.length}).${serverTimingSuffix}`);
+                    if (failureLogContext) {
+                        logger.warn(`[Gemini IP] ${hostname}${modelSuffix} returned ${response.status} via fixed IP ${fixedIp} (${decision.reason}). Switching to next fixed IP (${attemptIndex + 2}/${candidateIps.length}).${serverTimingSuffix}`, failureLogContext);
+                    } else {
+                        logger.warn(`[Gemini IP] ${hostname}${modelSuffix} returned ${response.status} via fixed IP ${fixedIp} (${decision.reason}). Switching to next fixed IP (${attemptIndex + 2}/${candidateIps.length}).${serverTimingSuffix}`);
+                    }
                     lastResponseError = this._createFixedIpResponseError(attemptOptions, response);
                     continue;
                 }
@@ -1692,7 +1814,11 @@ export class GeminiApiService {
                     logger.info(`[Gemini IP] ${hostname}${modelSuffix} fixed IP ${fixedIp} returned quota exhaustion. Falling back to the project's existing retry/quota handling.${serverTimingSuffix}`);
                 } else if (decision.action === 'rotate') {
                     const modelSuffix = model ? ` for model ${model}` : '';
-                    logger.warn(`[Gemini IP] ${hostname}${modelSuffix} still returned ${response.status} via fixed IP ${fixedIp} after exhausting fixed IP candidates.${serverTimingSuffix}`);
+                    if (failureLogContext) {
+                        logger.warn(`[Gemini IP] ${hostname}${modelSuffix} still returned ${response.status} via fixed IP ${fixedIp} after exhausting fixed IP candidates.${serverTimingSuffix}`, failureLogContext);
+                    } else {
+                        logger.warn(`[Gemini IP] ${hostname}${modelSuffix} still returned ${response.status} via fixed IP ${fixedIp} after exhausting fixed IP candidates.${serverTimingSuffix}`);
+                    }
                 }
 
                 throw this._createFixedIpResponseError(attemptOptions, response);

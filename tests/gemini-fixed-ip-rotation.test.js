@@ -5,6 +5,7 @@ import {
     classifyGeminiFixedIpError,
     classifyGeminiFixedIpResponse,
 } from '../src/providers/gemini/gemini-core.js';
+import logger from '../src/utils/logger.js';
 
 const { jest } = jestGlobals;
 
@@ -592,6 +593,64 @@ describe('Gemini fixed IP rotation transport', () => {
 
         expect(defaultAdapter).toHaveBeenCalledTimes(3);
         expect(defaultAdapter.mock.calls.every(([requestOptions]) => Boolean(requestOptions._geminiFixedIp))).toBe(true);
+    });
+
+    test('race mode logs upstream details for 500 fixed-IP failures', async () => {
+        const service = createService({
+            GEMINI_FIXED_IP_RACE_ENABLED: true,
+            GEMINI_FIXED_IP_RACE_CONCURRENCY: 1,
+            GEMINI_FIXED_IP_RACE_ROUNDS: 1,
+            GEMINI_FIXED_IP_RACE_FALLBACK_TO_DNS: false,
+            GEMINI_FIXED_IPS: ['1.1.1.1'],
+        });
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+        const defaultAdapter = jest.fn(async (requestOptions) => ({
+            status: 500,
+            data: {
+                error: {
+                    code: 500,
+                    status: 'INTERNAL',
+                    message: 'Backend shard failed for request abc123',
+                },
+            },
+            headers: {
+                'content-type': 'application/json',
+                'x-guploader-uploadid': 'upload-123',
+            },
+            config: requestOptions,
+        }));
+
+        try {
+            await expect(service._executeWithFixedIpRotation(
+                createRequestOptions(undefined, 'gemini-2.5-flash'),
+                defaultAdapter
+            )).rejects.toMatchObject({
+                response: {
+                    status: 500,
+                },
+            });
+
+            expect(warnSpy).toHaveBeenCalledWith(
+                expect.stringContaining('500-server-error'),
+                expect.objectContaining({
+                    method: 'POST',
+                    path: '/v1internal:loadCodeAssist',
+                    status: 500,
+                    reason: '500-server-error',
+                    fixedIp: '1.1.1.1',
+                    model: 'gemini-2.5-flash',
+                    upstreamCode: 500,
+                    upstreamStatus: 'INTERNAL',
+                    upstreamMessage: 'Backend shard failed for request abc123',
+                    headers: {
+                        'content-type': 'application/json',
+                        'x-guploader-uploadid': 'upload-123',
+                    },
+                })
+            );
+        } finally {
+            warnSpy.mockRestore();
+        }
     });
 
     test('race mode can repeat the same IPs across rounds when cooldown is disabled', async () => {
