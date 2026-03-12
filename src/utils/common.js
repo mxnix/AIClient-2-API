@@ -6,6 +6,7 @@ import logger from './logger.js';
 import { convertData, getOpenAIStreamChunkStop } from '../convert/convert.js';
 import { ProviderStrategyFactory } from './provider-strategies.js';
 import { getPluginManager } from '../core/plugin-manager.js';
+import { extractRuntimeTokenUsage, mergeRuntimeTokenUsage, recordRuntimeTokenUsage } from '../services/runtime-token-stats.js';
 
 // ==================== 网络错误处理 ====================
 
@@ -337,6 +338,13 @@ function tryMarkProviderWithQuotaRecovery({
     return true;
 }
 
+function getRuntimeStatsIdentity(service, toProvider, pooluuid) {
+    return {
+        providerType: toProvider,
+        uuid: pooluuid || service?.uuid || service?.config?.uuid || 'unknown',
+    };
+}
+
 export async function handleStreamRequest(res, service, model, requestBody, fromProvider, toProvider, PROMPT_LOG_MODE, PROMPT_LOG_FILENAME, providerPoolManager, pooluuid, customName, retryContext = null) {
     let fullResponseText = '';
     let fullResponseJson = '';
@@ -394,6 +402,8 @@ export async function handleStreamRequest(res, service, model, requestBody, from
 
     let hasToolCall = false;
     let hasMessageStop = false; // 跟踪是否已经发送过结束标志（message_stop / done）
+    let aggregatedUsage = null;
+    const runtimeIdentity = getRuntimeStatsIdentity(service, toProvider, pooluuid);
 
     try {
         // fs.writeFile('request'+Date.now()+'.json', JSON.stringify(requestBody));
@@ -416,6 +426,11 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                 logger.info('[Stream] Stopping iteration due to client disconnect');
                 break;
             }
+
+            aggregatedUsage = mergeRuntimeTokenUsage(
+                aggregatedUsage,
+                extractRuntimeTokenUsage(nativeChunk, toProvider)
+            );
             
             // Extract text for logging purposes
             const chunkText = extractResponseText(nativeChunk, toProvider);
@@ -539,6 +554,11 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                 uuid: pooluuid
             });
         }
+
+        recordRuntimeTokenUsage({
+            ...runtimeIdentity,
+            usage: aggregatedUsage,
+        });
 
     }  catch (error) {
         logger.error('\n[Server] Error during stream processing:', error.stack);
@@ -761,9 +781,11 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
     try{
         // The service returns the response in its native format (toProvider).
         const needsConversion = getProtocolPrefix(fromProvider) !== getProtocolPrefix(toProvider);
+        const runtimeIdentity = getRuntimeStatsIdentity(service, toProvider, pooluuid);
         requestBody.model = model;
         // fs.writeFile('oldRequest'+Date.now()+'.json', JSON.stringify(requestBody));
         const nativeResponse = await service.generateContent(model, requestBody);
+        const runtimeUsage = extractRuntimeTokenUsage(nativeResponse, toProvider);
         const responseText = extractResponseText(nativeResponse, toProvider);
 
         // Convert the response back to the client's format (fromProvider), if necessary.
@@ -791,6 +813,10 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         //logger.info(`[Response] Sending response to client: ${JSON.stringify(clientResponse)}`);
         await handleUnifiedResponse(res, JSON.stringify(clientResponse), false);
         await logConversation('output', responseText, PROMPT_LOG_MODE, PROMPT_LOG_FILENAME);
+        recordRuntimeTokenUsage({
+            ...runtimeIdentity,
+            usage: runtimeUsage,
+        });
         // fs.writeFile('oldResponse'+Date.now()+'.json', JSON.stringify(clientResponse));
         
         // 一元请求成功完成，统计使用次数，错误次数重置为0

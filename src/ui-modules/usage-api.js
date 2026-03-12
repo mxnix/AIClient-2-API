@@ -2,6 +2,7 @@ import { CONFIG } from '../core/config-manager.js';
 import logger from '../utils/logger.js';
 import { serviceInstances, getServiceAdapter } from '../providers/adapter.js';
 import { formatKiroUsage, formatGeminiUsage, formatAntigravityUsage, formatCodexUsage, formatGrokUsage } from '../services/usage-service.js';
+import { createEmptyRuntimeTokenStats, getRuntimeTokenStats } from '../services/runtime-token-stats.js';
 import { readUsageCache, writeUsageCache, readProviderUsageCache, updateProviderUsageCache } from './usage-cache.js';
 import path from 'path';
 
@@ -128,6 +129,45 @@ async function getProviderTypeUsage(providerType, currentConfig, providerPoolMan
     }
 
     return result;
+}
+
+function attachRuntimeStatsToProviderUsage(providerType, providerUsage) {
+    if (!providerUsage?.instances || !Array.isArray(providerUsage.instances)) {
+        return providerUsage;
+    }
+
+    return {
+        ...providerUsage,
+        instances: providerUsage.instances.map((instance) => ({
+            ...instance,
+            runtimeStats: getRuntimeTokenStats(providerType, instance.uuid) || createEmptyRuntimeTokenStats(),
+        })),
+    };
+}
+
+function attachRuntimeStats(usageResults) {
+    if (!usageResults) {
+        return usageResults;
+    }
+
+    if (usageResults.providers && typeof usageResults.providers === 'object') {
+        const providers = {};
+
+        for (const [providerType, providerUsage] of Object.entries(usageResults.providers)) {
+            providers[providerType] = attachRuntimeStatsToProviderUsage(providerType, providerUsage);
+        }
+
+        return {
+            ...usageResults,
+            providers,
+        };
+    }
+
+    if (usageResults.providerType) {
+        return attachRuntimeStatsToProviderUsage(usageResults.providerType, usageResults);
+    }
+
+    return usageResults;
 }
 
 /**
@@ -278,7 +318,7 @@ export async function handleGetUsage(req, res, currentConfig, providerPoolManage
         
         // Always include current server time
         const finalResults = {
-            ...usageResults,
+            ...attachRuntimeStats(usageResults),
             serverTime: new Date().toISOString()
         };
         
@@ -327,7 +367,7 @@ export async function handleGetProviderUsage(req, res, currentConfig, providerPo
         
         // Always include current server time
         const finalResults = {
-            ...usageResults,
+            ...attachRuntimeStats(usageResults),
             serverTime: new Date().toISOString()
         };
         

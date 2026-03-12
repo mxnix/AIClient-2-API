@@ -567,8 +567,10 @@ function createInstanceUsageCard(instance, providerType) {
                 <span>${instance.error}</span>
             </div>
         `;
-    } else if (instance.usage) {
-        content.appendChild(renderUsageDetails(instance.usage, providerType));
+    }
+
+    if (instance.usage || instance.runtimeStats) {
+        content.appendChild(renderUsageDetails(instance.usage, providerType, instance.runtimeStats));
     }
 
     expandedContent.appendChild(content);
@@ -581,17 +583,19 @@ function createInstanceUsageCard(instance, providerType) {
  * 渲染用量详情 - 显示总用量、用量明细和到期时间
  * @param {Object} usage - 用量数据
  * @param {string} providerType - 提供商类型
+ * @param {Object} runtimeStats - 运行时 token 统计
  * @returns {HTMLElement} 详情元素
  */
-function renderUsageDetails(usage, providerType) {
+function renderUsageDetails(usage, providerType, runtimeStats = null) {
     const container = document.createElement('div');
     container.className = 'usage-details';
 
     // 检查是否应该显示用量信息
     const showUsage = shouldShowUsage(providerType);
+    const usageBreakdown = Array.isArray(usage?.usageBreakdown) ? usage.usageBreakdown : [];
     
     // 计算总用量
-    const totalUsage = calculateTotalUsage(usage.usageBreakdown);
+    const totalUsage = calculateTotalUsage(usageBreakdown);
     
     // 总用量进度条（不支持显示用量的提供商不显示）
     if (totalUsage.hasData && showUsage) {
@@ -610,7 +614,7 @@ function renderUsageDetails(usage, providerType) {
                 </div>
             `;
         } else {
-            const resetTimeEntry = usage.usageBreakdown.find(b => b.resetTime && b.resetTime !== '--');
+            const resetTimeEntry = usageBreakdown.find(b => b.resetTime && b.resetTime !== '--');
             if (resetTimeEntry) {
                 const formattedResetTime = formatDate(resetTimeEntry.resetTime);
                 resetTimeHTML = `
@@ -646,13 +650,13 @@ function renderUsageDetails(usage, providerType) {
     }
 
     // 用量明细（包含免费试用和奖励信息）
-    if (usage.usageBreakdown && usage.usageBreakdown.length > 0) {
+    if (usageBreakdown.length > 0) {
         const breakdownSection = document.createElement('div');
         breakdownSection.className = 'usage-section usage-breakdown-compact';
         
         let breakdownHTML = '';
         
-        for (const breakdown of usage.usageBreakdown) {
+        for (const breakdown of usageBreakdown) {
             breakdownHTML += createUsageBreakdownHTML(breakdown, providerType);
         }
         
@@ -660,7 +664,60 @@ function renderUsageDetails(usage, providerType) {
         container.appendChild(breakdownSection);
     }
 
+    if (runtimeStats) {
+        container.appendChild(renderRuntimeTokenStats(runtimeStats));
+    }
+
     return container;
+}
+
+function renderRuntimeTokenStats(runtimeStats) {
+    const section = document.createElement('div');
+    section.className = 'usage-section runtime-token-stats';
+
+    const rows = [
+        createRuntimeInfoItem('usage.runtimeRequests', formatTokenCount(runtimeStats.requests), 'fas fa-hashtag'),
+        createRuntimeInfoItem('usage.runtimeInputTokens', formatTokenCount(runtimeStats.inputTokens), 'fas fa-arrow-down'),
+        createRuntimeInfoItem('usage.runtimeOutputTokens', formatTokenCount(runtimeStats.outputTokens), 'fas fa-arrow-up'),
+    ];
+
+    if (runtimeStats.cachedTokens > 0) {
+        rows.push(createRuntimeInfoItem('usage.runtimeCachedTokens', formatTokenCount(runtimeStats.cachedTokens), 'fas fa-database'));
+    }
+
+    if (runtimeStats.reasoningTokens > 0) {
+        rows.push(createRuntimeInfoItem('usage.runtimeReasoningTokens', formatTokenCount(runtimeStats.reasoningTokens), 'fas fa-brain'));
+    }
+
+    if (runtimeStats.since) {
+        rows.push(createRuntimeInfoItem('usage.runtimeSince', formatDate(runtimeStats.since), 'fas fa-play'));
+    }
+
+    if (runtimeStats.lastUpdated) {
+        rows.push(createRuntimeInfoItem('usage.runtimeUpdatedAt', formatDate(runtimeStats.lastUpdated), 'fas fa-clock'));
+    }
+
+    section.innerHTML = `
+        <h4>
+            <i class="fas fa-chart-line"></i>
+            <span data-i18n="usage.runtimeTokens">${t('usage.runtimeTokens')}</span>
+        </h4>
+        <div class="info-grid">${rows.join('')}</div>
+    `;
+
+    return section;
+}
+
+function createRuntimeInfoItem(labelKey, value, iconClass) {
+    return `
+        <div class="info-item">
+            <span class="label">
+                <i class="${iconClass}"></i>
+                <span data-i18n="${labelKey}">${t(labelKey)}</span>
+            </span>
+            <span class="value">${value}</span>
+        </div>
+    `;
 }
 
 /**
@@ -920,6 +977,15 @@ function formatNumber(num) {
     // 向上取整到两位小数
     const rounded = Math.ceil(num * 100) / 100;
     return rounded.toFixed(2);
+}
+
+function formatTokenCount(num) {
+    const tokenCount = Number(num);
+    if (!Number.isFinite(tokenCount)) {
+        return '0';
+    }
+
+    return new Intl.NumberFormat(getCurrentLanguage()).format(Math.max(0, Math.round(tokenCount)));
 }
 
 /**
