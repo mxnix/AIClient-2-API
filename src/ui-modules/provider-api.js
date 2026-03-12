@@ -6,6 +6,21 @@ import { generateUUID, createProviderConfig, formatSystemPath, detectProviderFro
 import { broadcastEvent } from './event-broadcast.js';
 import { getRegisteredProviders } from '../providers/adapter.js';
 
+function validateProviderPoolRequirements(providerType, providerConfig) {
+    if (providerType !== 'gemini-cli-oauth') {
+        return null;
+    }
+
+    const projectId = typeof providerConfig?.PROJECT_ID === 'string'
+        ? providerConfig.PROJECT_ID.trim()
+        : '';
+    if (projectId) {
+        return null;
+    }
+
+    return 'PROJECT_ID is required for gemini-cli-oauth nodes in Provider Pools. Set a Google Cloud Project ID explicitly instead of leaving the field blank.';
+}
+
 /**
  * 获取提供商池摘要
  */
@@ -100,6 +115,13 @@ export async function handleAddProvider(req, res, currentConfig, providerPoolMan
         if (!providerType || !providerConfig) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: { message: 'providerType and providerConfig are required' } }));
+            return true;
+        }
+
+        const validationError = validateProviderPoolRequirements(providerType, providerConfig);
+        if (validationError) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: { message: validationError } }));
             return true;
         }
 
@@ -226,6 +248,13 @@ export async function handleUpdateProvider(req, res, currentConfig, providerPool
             errorCount: existingProvider.errorCount,
             lastErrorTime: existingProvider.lastErrorTime
         };
+
+        const validationError = validateProviderPoolRequirements(providerType, updatedProvider);
+        if (validationError) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: { message: validationError } }));
+            return true;
+        }
 
         providerPools[providerType][providerIndex] = updatedProvider;
 

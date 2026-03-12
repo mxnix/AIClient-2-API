@@ -981,4 +981,42 @@ describe('Gemini initialization', () => {
 
         expect(service.discoverProjectAndModels).not.toHaveBeenCalled();
     });
+
+    test('normalizes discovered project objects returned by loadCodeAssist', async () => {
+        const service = createService({ PROJECT_ID: '', uuid: 'pool-node-1' });
+        service.loadCredentials = jest.fn(async () => {
+            service.authClient.setCredentials({ access_token: 'access-token' });
+        });
+        service.callApi = jest.fn(async () => ({
+            cloudaicompanionProject: {
+                id: 'discovered-project',
+                displayName: 'Project Name',
+            },
+        }));
+
+        await service.initialize();
+
+        expect(service.projectId).toBe('discovered-project');
+        expect(service.callApi).toHaveBeenCalledWith('loadCodeAssist', {
+            cloudaicompanionProject: '',
+            metadata: {
+                ideType: 'IDE_UNSPECIFIED',
+                platform: 'PLATFORM_UNSPECIFIED',
+                pluginType: 'GEMINI',
+                duetProject: '',
+            },
+        });
+    });
+
+    test('fails with a provider-pool specific error when PROJECT_ID remains empty', async () => {
+        const service = createService({ PROJECT_ID: '', uuid: 'pool-node-1' });
+        service.loadCredentials = jest.fn(async () => {
+            service.authClient.setCredentials({ access_token: 'access-token' });
+        });
+        service.discoverProjectAndModels = jest.fn(async () => '');
+
+        await expect(service.initialize()).rejects.toThrow(
+            'Provider pool node pool-node-1 is missing PROJECT_ID. Set PROJECT_ID explicitly in Provider Pools for gemini-cli-oauth.'
+        );
+    });
 });

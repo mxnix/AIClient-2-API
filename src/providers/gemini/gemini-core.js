@@ -174,6 +174,18 @@ function extractGeminiErrorText(value) {
     }
 }
 
+function extractGeminiProjectId(rawProject) {
+    if (typeof rawProject === 'string' && rawProject.trim()) {
+        return rawProject.trim();
+    }
+
+    if (typeof rawProject?.id === 'string' && rawProject.id.trim()) {
+        return rawProject.id.trim();
+    }
+
+    return '';
+}
+
 function isGeminiNoCapacityText(text) {
     const normalized = String(text || '').toLowerCase();
     return normalized.includes('no capacity available for model') &&
@@ -1088,7 +1100,7 @@ export class GeminiApiService {
         this.host = config.HOST;
         this.oauthCredsBase64 = config.GEMINI_OAUTH_CREDS_BASE64;
         this.oauthCredsFilePath = config.GEMINI_OAUTH_CREDS_FILE_PATH;
-        this.projectId = config.PROJECT_ID;
+        this.projectId = extractGeminiProjectId(config.PROJECT_ID);
         this.uuid = config.uuid;
         this.codeAssistEndpoint = config.GEMINI_BASE_URL || DEFAULT_CODE_ASSIST_ENDPOINT;
         this.replaceSpaceEnabled = isGeminiReplaceSpaceEnabled(config.GEMINI_REPLACE_SPACE);
@@ -1878,6 +1890,9 @@ export class GeminiApiService {
         await this.loadCredentials();
 
         if (!this.projectId) {
+            if (this.uuid) {
+                logger.warn(`[Gemini] Provider pool node ${this.uuid} has no PROJECT_ID configured. Trying automatic discovery via loadCodeAssist.`);
+            }
             if (!this.authClient.credentials.access_token && this.authClient.credentials.refresh_token) {
                 logger.info('[Gemini Auth] Access token is missing before project discovery. Refreshing from stored refresh token...');
                 await this.initializeAuth(false);
@@ -1887,7 +1902,14 @@ export class GeminiApiService {
                 throw new Error('Could not discover a valid Google Cloud Project ID because no Gemini OAuth credentials were loaded. Configure PROJECT_ID explicitly or provide valid OAuth credentials.');
             }
 
-            this.projectId = await this.discoverProjectAndModels();
+            this.projectId = extractGeminiProjectId(await this.discoverProjectAndModels());
+            if (!this.projectId) {
+                if (this.uuid) {
+                    throw new Error(`Provider pool node ${this.uuid} is missing PROJECT_ID. Set PROJECT_ID explicitly in Provider Pools for gemini-cli-oauth.`);
+                }
+
+                throw new Error('Could not discover a valid Google Cloud Project ID from Gemini loadCodeAssist. Configure PROJECT_ID explicitly or provide valid OAuth credentials.');
+            }
         } else {
             logger.info(`[Gemini] Using provided Project ID: ${this.projectId}`);
             this.availableModels = GEMINI_MODELS;
@@ -2062,8 +2084,9 @@ export class GeminiApiService {
             const loadResponse = await this.callApi('loadCodeAssist', loadRequest);
 
             // Check if we already have a project ID from the response
-            if (loadResponse.cloudaicompanionProject) {
-                return loadResponse.cloudaicompanionProject;
+            const discoveredExistingProjectId = extractGeminiProjectId(loadResponse.cloudaicompanionProject);
+            if (discoveredExistingProjectId) {
+                return discoveredExistingProjectId;
             }
 
             // If no existing project, we need to onboard
@@ -2092,7 +2115,7 @@ export class GeminiApiService {
                 throw new Error('Onboarding timeout: Operation did not complete within expected time.');
             }
 
-            const discoveredProjectId = lroResponse.response?.cloudaicompanionProject?.id || initialProjectId;
+            const discoveredProjectId = extractGeminiProjectId(lroResponse.response?.cloudaicompanionProject) || initialProjectId;
             return discoveredProjectId;
         } catch (error) {
             logger.error('[Gemini] Failed to discover Project ID:', error.response?.data || error.message);
